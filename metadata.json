@@ -1,0 +1,6 @@
+{
+  "name": "College Attendance Management System",
+  "description": "A comprehensive university-grade web system for managing batches, students, lecturers, timetables, and interactive attendance marking with real-time dashboards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
