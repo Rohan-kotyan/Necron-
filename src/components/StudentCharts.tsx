@@ -11,6 +11,7 @@ import {
   Cell,
   LineChart,
   Line,
+  LabelList,
 } from "recharts";
 
 interface SubjectStat {
@@ -51,6 +52,47 @@ const CustomTooltip = ({ active, payload, label }: any) => {
     );
   }
   return null;
+};
+
+// Wraps long subject names onto up to two short lines so labels stay
+// fully visible near their bar and never overlap neighboring labels,
+// on both mobile and desktop.
+const SubjectAxisTick = (props: any) => {
+  const { x, y, payload } = props;
+  const value = String(payload?.value ?? "");
+  const words = value.split(" ");
+  const lines: string[] = [];
+  let current = "";
+  words.forEach((word) => {
+    const candidate = (current + " " + word).trim();
+    if (candidate.length > 11 && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  });
+  if (current) lines.push(current);
+  const finalLines = lines.slice(0, 2);
+
+  return (
+    <g transform={`translate(${x},${y})`}>
+      {finalLines.map((line, i) => (
+        <text
+          key={i}
+          x={0}
+          y={0}
+          dy={12 + i * 12}
+          textAnchor="middle"
+          fill="#cbd5e1"
+          fontSize={10}
+          fontWeight={700}
+        >
+          {line}
+        </text>
+      ))}
+    </g>
+  );
 };
 
 export default function StudentCharts({ subjectData, monthlyData, overallPercentage }: ChartsProps) {
@@ -127,37 +169,67 @@ export default function StudentCharts({ subjectData, monthlyData, overallPercent
       </div>
 
       {/* 2. Subject-wise Attendance Bar Chart */}
-      <div className="bg-[#0B1120] p-6 rounded-3xl shadow-2xl shadow-black/45 border border-white/5 lg:col-span-2">
+      <div className="bg-[#0B1120] p-4 sm:p-6 rounded-3xl shadow-2xl shadow-black/45 border border-white/5 lg:col-span-2 min-w-0">
         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Subject-wise Analytics</h3>
-        
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={subjectData}
-              margin={{ top: 10, right: 10, left: -25, bottom: 5 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
-              <XAxis 
-                dataKey="subjectName" 
-                tick={{ fill: "#94a3b8", fontSize: 10, fontWeight: "bold" }}
-                axisLine={false}
-                tickLine={false}
+
+        {subjectData.length === 0 ? (
+          <div className="h-64 flex items-center justify-center text-xs text-slate-500 font-semibold">
+            No active subjects to display yet.
+          </div>
+        ) : (
+          <div className="h-64 sm:h-72 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={subjectData}
+                margin={{ top: 24, right: 14, left: -18, bottom: 10 }}
+                barCategoryGap="30%"
+              >
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
+                <XAxis
+                  dataKey="subjectName"
+                  tick={<SubjectAxisTick />}
+                  interval={0}
+                  height={42}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  domain={[0, 100]}
+                  tick={{ fill: "#94a3b8", fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(255, 255, 255, 0.02)" }} />
+                <ReferenceLine y={75} stroke="#f43f5e" strokeDasharray="4 4" label={{ value: '75% Threshold', position: 'insideTopRight', fill: '#f43f5e', fontSize: 9, fontWeight: 'bold' }} />
+                <Bar dataKey="percentage" radius={[8, 8, 0, 0]} barSize={28} maxBarSize={36}>
+                  {subjectData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={getHexColor(entry.percentage)} />
+                  ))}
+                  <LabelList
+                    dataKey="percentage"
+                    position="top"
+                    formatter={(v: number) => `${v.toFixed(0)}%`}
+                    style={{ fill: "#e2e8f0", fontSize: 11, fontWeight: 700 }}
+                  />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {/* Legend: maps each subject to its bar color so it stays identifiable even if labels get tight on small screens */}
+        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
+          {subjectData.map((entry, idx) => (
+            <div key={idx} className="flex items-center gap-1.5 min-w-0">
+              <span
+                className="w-2.5 h-2.5 rounded-full shrink-0"
+                style={{ backgroundColor: getHexColor(entry.percentage) }}
               />
-              <YAxis 
-                domain={[0, 100]} 
-                tick={{ fill: "#94a3b8", fontSize: 10 }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(255, 255, 255, 0.02)" }} />
-              <ReferenceLine y={75} stroke="#rose-500" strokeDasharray="4 4" label={{ value: '75% Threshold', position: 'insideTopRight', fill: '#f43f5e', fontSize: 9, fontWeight: 'bold' }} />
-              <Bar dataKey="percentage" radius={[8, 8, 0, 0]} barSize={26}>
-                {subjectData.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={getHexColor(entry.percentage)} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-300 truncate max-w-[140px]">
+                {entry.subjectName}
+              </span>
+            </div>
+          ))}
         </div>
       </div>
 
