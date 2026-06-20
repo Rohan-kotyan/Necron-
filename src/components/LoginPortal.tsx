@@ -61,20 +61,43 @@ export default function LoginPortal({ onLoginSuccess }: LoginPortalProps) {
     setError(null);
 
     try {
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password, role }),
       });
 
-      const data = await response.json();
+      // Safely parse JSON — Vercel may return an empty body for unmatched routes
+      // (e.g. /api/auth/*), which previously caused
+      // "Failed to execute 'json' on 'Response': Unexpected end of JSON input"
+      let data: any = null;
+      const text = await response.text();
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          throw new Error(
+            `Server returned a non-JSON response (HTTP ${response.status}). Please try again.`
+          );
+        }
+      }
+
       if (!response.ok) {
-        throw new Error(data.error || "Authentication failed.");
+        throw new Error(data?.error || `Authentication failed (HTTP ${response.status}).`);
+      }
+
+      if (!data || !data.token) {
+        throw new Error("Server did not return a valid session token.");
       }
 
       onLoginSuccess(data);
     } catch (err: any) {
-      setError(err.message || "Something went wrong. Please check your credentials.");
+      // Suppress the noisy fetch-level JSON parse message into a friendly string
+      const raw = err?.message || "";
+      const friendly = raw.includes("Unexpected end of JSON input")
+        ? "The login service is unreachable. Please try again in a moment."
+        : raw || "Something went wrong. Please check your credentials.";
+      setError(friendly);
     } finally {
       setLoading(false);
     }
@@ -121,9 +144,22 @@ export default function LoginPortal({ onLoginSuccess }: LoginPortalProps) {
         }),
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Could not create your account.");
+      // Safely parse JSON — endpoint may not exist yet on this deployment
+      let data: any = null;
+      const text = await response.text();
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          /* fall through to the friendly error below */
+        }
+      }
+
+      if (!response.ok || !data) {
+        throw new Error(
+          data?.error ||
+            "Student self-signup is not yet available on this deployment. Please contact the administrator to provision your account."
+        );
       }
 
       setSignupSuccess(true);
@@ -132,7 +168,11 @@ export default function LoginPortal({ onLoginSuccess }: LoginPortalProps) {
         onLoginSuccess(data);
       }, 900);
     } catch (err: any) {
-      setError(err.message || "Something went wrong while creating your account.");
+      const raw = err?.message || "";
+      const friendly = raw.includes("Unexpected end of JSON input")
+        ? "Student self-signup is not yet available on this deployment. Please contact the administrator."
+        : raw || "Something went wrong while creating your account.";
+      setError(friendly);
     } finally {
       setLoading(false);
     }
