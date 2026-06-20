@@ -1,20 +1,17 @@
 import React from "react";
 import {
-  BarChart,
-  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
-  Cell,
   LineChart,
   Line,
-  LabelList,
 } from "recharts";
 
 interface SubjectStat {
+  id?: string;
   subjectName: string;
   percentage: number;
   present: number;
@@ -52,47 +49,6 @@ const CustomTooltip = ({ active, payload, label }: any) => {
     );
   }
   return null;
-};
-
-// Wraps long subject names onto up to two short lines so labels stay
-// fully visible near their bar and never overlap neighboring labels,
-// on both mobile and desktop.
-const SubjectAxisTick = (props: any) => {
-  const { x, y, payload } = props;
-  const value = String(payload?.value ?? "");
-  const words = value.split(" ");
-  const lines: string[] = [];
-  let current = "";
-  words.forEach((word) => {
-    const candidate = (current + " " + word).trim();
-    if (candidate.length > 11 && current) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = candidate;
-    }
-  });
-  if (current) lines.push(current);
-  const finalLines = lines.slice(0, 2);
-
-  return (
-    <g transform={`translate(${x},${y})`}>
-      {finalLines.map((line, i) => (
-        <text
-          key={i}
-          x={0}
-          y={0}
-          dy={12 + i * 12}
-          textAnchor="middle"
-          fill="#cbd5e1"
-          fontSize={10}
-          fontWeight={700}
-        >
-          {line}
-        </text>
-      ))}
-    </g>
-  );
 };
 
 export default function StudentCharts({ subjectData, monthlyData, overallPercentage }: ChartsProps) {
@@ -168,69 +124,63 @@ export default function StudentCharts({ subjectData, monthlyData, overallPercent
         </div>
       </div>
 
-      {/* 2. Subject-wise Attendance Bar Chart */}
-      <div className="bg-[#0B1120] p-4 sm:p-6 rounded-3xl shadow-2xl shadow-black/45 border border-white/5 lg:col-span-2 min-w-0">
-        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Subject-wise Analytics</h3>
+      {/* 2. Subject-wise Attendance — horizontal bars with the subject name and
+          percentage attached directly to each bar's own row. This avoids the
+          classic recharts problem of cramming every subject name along a single
+          x-axis, which overlaps/crowds on narrow (mobile) screens. */}
+      <div className="bg-[#0B1120] p-6 rounded-3xl shadow-2xl shadow-black/45 border border-white/5 lg:col-span-2">
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-5">Subject-wise Analytics</h3>
 
         {subjectData.length === 0 ? (
-          <div className="h-64 flex items-center justify-center text-xs text-slate-500 font-semibold">
-            No active subjects to display yet.
+          <div className="h-40 flex items-center justify-center text-xs font-semibold text-slate-500">
+            No subject data available.
           </div>
         ) : (
-          <div className="h-64 sm:h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={subjectData}
-                margin={{ top: 24, right: 14, left: -18, bottom: 10 }}
-                barCategoryGap="30%"
-              >
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#1e293b" />
-                <XAxis
-                  dataKey="subjectName"
-                  tick={<SubjectAxisTick />}
-                  interval={0}
-                  height={42}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  domain={[0, 100]}
-                  tick={{ fill: "#94a3b8", fontSize: 10 }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip content={<CustomTooltip />} cursor={{ fill: "rgba(255, 255, 255, 0.02)" }} />
-                <ReferenceLine y={75} stroke="#f43f5e" strokeDasharray="4 4" label={{ value: '75% Threshold', position: 'insideTopRight', fill: '#f43f5e', fontSize: 9, fontWeight: 'bold' }} />
-                <Bar dataKey="percentage" radius={[8, 8, 0, 0]} barSize={28} maxBarSize={36}>
-                  {subjectData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={getHexColor(entry.percentage)} />
-                  ))}
-                  <LabelList
-                    dataKey="percentage"
-                    position="top"
-                    formatter={(v: number) => `${v.toFixed(0)}%`}
-                    style={{ fill: "#e2e8f0", fontSize: 11, fontWeight: 700 }}
-                  />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="space-y-5 max-h-80 overflow-y-auto pr-1">
+            {subjectData.map((entry) => {
+              const color = getHexColor(entry.percentage);
+              const widthPct = Math.min(Math.max(entry.percentage, 0), 100);
+              return (
+                <div key={entry.id ?? entry.subjectName} className="w-full">
+                  {/* Label row: subject name attached directly above its own bar */}
+                  <div className="flex items-baseline justify-between gap-3 mb-1.5">
+                    <span
+                      className="text-xs sm:text-sm font-bold text-slate-200 leading-snug break-words pr-2"
+                      title={entry.subjectName}
+                    >
+                      {entry.subjectName}
+                    </span>
+                    <span
+                      className="text-xs sm:text-sm font-mono font-extrabold shrink-0"
+                      style={{ color }}
+                    >
+                      {entry.percentage.toFixed(1)}%
+                    </span>
+                  </div>
+
+                  {/* Bar track */}
+                  <div className="relative w-full h-3 sm:h-3.5 rounded-full bg-slate-900/80 border border-white/[0.04] overflow-hidden">
+                    {/* 75% threshold marker */}
+                    <div
+                      className="absolute top-0 bottom-0 w-px bg-rose-500/60"
+                      style={{ left: "75%" }}
+                      title="75% threshold"
+                    />
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${widthPct}%`, backgroundColor: color }}
+                    />
+                  </div>
+
+                  {/* Secondary detail: classes attended, kept small + muted */}
+                  <div className="mt-1 text-[10px] font-semibold text-slate-500">
+                    {entry.present}/{entry.total} classes attended
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
-
-        {/* Legend: maps each subject to its bar color so it stays identifiable even if labels get tight on small screens */}
-        <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2">
-          {subjectData.map((entry, idx) => (
-            <div key={idx} className="flex items-center gap-1.5 min-w-0">
-              <span
-                className="w-2.5 h-2.5 rounded-full shrink-0"
-                style={{ backgroundColor: getHexColor(entry.percentage) }}
-              />
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-300 truncate max-w-[140px]">
-                {entry.subjectName}
-              </span>
-            </div>
-          ))}
-        </div>
       </div>
 
       {/* 3. Monthly Attendance Line Chart */}
