@@ -36,9 +36,9 @@ export default function StudentDashboard({ session, onLogout, isDark, onThemeTog
     async function loadStudentData() {
       try {
         const [subsRes, ttRes, attnRes] = await Promise.all([
-          fetch("/api/subjects"),
-          fetch(`/api/timetable/batch/${user.batch}`),
-          fetch(`/api/attendance/student/${user.id}`),
+          fetch("/api/data?type=subjects"),
+          fetch(`/api/data?type=timetable&batch=${user.batch}`),
+          fetch(`/api/attendance?type=student&id=${user.id}`),
         ]);
 
         const subsData = await subsRes.json();

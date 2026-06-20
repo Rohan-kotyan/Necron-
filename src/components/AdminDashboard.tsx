@@ -50,12 +50,11 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
 
   const loadAdminData = async () => {
     try {
-      const [studRes, lectRes, subRes, ttRes, attRes] = await Promise.all([
-        fetch("/api/students"),
-        fetch("/api/lecturers"),
-        fetch("/api/subjects"),
-        fetch("/api/attendance/history"), // Actually fetches log histories
-        fetch("/api/timetable/batch/A1") // Initial timetable load
+      const [studRes, lectRes, subRes, attRes] = await Promise.all([
+        fetch("/api/data?type=students"),
+        fetch("/api/data?type=lecturers"),
+        fetch("/api/data?type=subjects"),
+        fetch("/api/attendance?type=history"),
       ]);
 
       const studData = await studRes.json();
@@ -101,7 +100,7 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
   const handleRemoveLecturer = async (id: string) => {
     if (!confirm("Are you sure you want to remove this Lecturer staff member?")) return;
     try {
-      const res = await fetch(`/api/admin/lecturers/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/admin/lecturers?id=${id}`, { method: "DELETE" });
       if (res.ok) {
         showToast("Lecturer successfully purged.");
         loadAdminData();
@@ -140,7 +139,7 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
   const handleRemoveStudent = async (id: string) => {
     if (!confirm("Are you sure you want to remove this student? (This deletes historical attendance records associated with them!)")) return;
     try {
-      const res = await fetch(`/api/admin/students/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/admin/students?id=${id}`, { method: "DELETE" });
       if (res.ok) {
         showToast("Student purged successfully from ERP Database.");
         loadAdminData();
@@ -159,10 +158,10 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
     }
 
     try {
-      const res = await fetch("/api/admin/subjects", {
+      const res = await fetch("/api/admin/timetable", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newSubject)
+        body: JSON.stringify({ type: "subject", ...newSubject })
       });
       if (res.ok) {
         showToast("Subject Course added successfully.");

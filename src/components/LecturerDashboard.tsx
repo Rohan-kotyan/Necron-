@@ -61,8 +61,8 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
     async function initDB() {
       try {
         const [subsRes, histRes] = await Promise.all([
-          fetch("/api/subjects"),
-          fetch("/api/attendance/history")
+          fetch("/api/data?type=subjects"),
+          fetch("/api/attendance?type=history")
         ]);
         const subsData = await subsRes.json();
         const histData = await histRes.json();
@@ -78,7 +78,7 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
   // Fetch student rosters for batch step 4
   const fetchActiveRoster = async () => {
     try {
-      const url = `/api/students?batch=${selectedBatch}&specialization=${encodeURIComponent(selectedSpecialization)}`;
+      const url = `/api/data?type=students&batch=${selectedBatch}&specialization=${encodeURIComponent(selectedSpecialization)}`;
       const res = await fetch(url);
       const data = await res.json();
       const loadedStudents = data.students || [];
@@ -106,7 +106,7 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
         status: records[studentId]
       }));
 
-      const res = await fetch("/api/attendance/mark", {
+      const res = await fetch("/api/attendance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
