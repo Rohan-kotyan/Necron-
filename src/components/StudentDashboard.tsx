@@ -87,20 +87,22 @@ export default function StudentDashboard({ session, onLogout, isDark, onThemeTog
     };
   }, [user.batch]);
 
-  // Subjects that should never appear in the Student View's "Subject-wise
-  // Detailed Analysis" section. Only these four are excluded — everything
-  // else (including any other "Data Structures..." variants) stays visible.
-  const EXCLUDED_SUBJECT_NAMES = new Set([
-    "data structures",
-    "break",
-    "mv",
-    "sports",
-  ]);
-
-  const visibleSubjects = subjects.filter((sub) => {
-    const normalized = String(sub.name || "").trim().toLowerCase();
-    return !EXCLUDED_SUBJECT_NAMES.has(normalized);
-  });
+  // Subjects that should never be shown in the Student View, regardless of how
+  // they're spelled/cased in the database (handles known typos like
+  // "artifical inteligence" / "web technogy" coming from the subjects table).
+  const HIDDEN_SUBJECTS = new Set(
+    [
+      "Data Structures",
+      "Break",
+      "MV",
+      "Sports",
+      "artifical inteligence",
+      "web technogy",
+    ].map((s) => s.trim().toLowerCase())
+  );
+  const visibleSubjects = subjects.filter(
+    (sub) => !HIDDEN_SUBJECTS.has(String(sub.name || "").trim().toLowerCase())
+  );
 
   // Compute subject-by-subject statistics
   const subjectStats = visibleSubjects.map((sub) => {
@@ -263,73 +265,65 @@ export default function StudentDashboard({ session, onLogout, isDark, onThemeTog
             {/* 3. Subject-wise Cards & Mathematical Estimates */}
             <section className="space-y-4">
               <h3 className="text-sm font-bold tracking-widest text-slate-400 uppercase">Subject-wise Detailed Analysis</h3>
-
-              {subjectStats.length === 0 ? (
-                <div className="bg-[#0B1120] rounded-3xl p-8 text-center text-sm text-slate-400 border border-white/5">
-                  No active subjects with attendance tracking are available right now.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
-                  {subjectStats.map((stat) => {
-                    const isSafe = stat.percentage >= 75;
-                    return (
-                      <div
-                        key={stat.id}
-                        className="bg-[#0B1120] rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-2xl shadow-black/40 border border-white/5 flex flex-col justify-between min-w-0 overflow-hidden"
-                      >
-                        <div className="space-y-3 sm:space-y-4 min-w-0">
-                          <div className="flex justify-between items-start gap-2 min-w-0">
-                            <div className="min-w-0">
-                              <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider">Course Subject</span>
-                              <h4 className="text-base sm:text-lg font-bold text-white mt-0.5 break-words" title={stat.subjectName}>
-                                {stat.subjectName}
-                              </h4>
-                            </div>
-
-                            <div className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-extrabold tracking-wider uppercase border whitespace-nowrap ${
-                              isSafe
-                                ? "bg-emerald-950/20 border-emerald-900/50 text-emerald-400"
-                                : "bg-rose-950/20 border-rose-900/50 text-rose-450"
-                            }`}>
-                              {isSafe ? "Safe" : "Below Requirement"}
-                            </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 sm:gap-6">
+                {subjectStats.map((stat) => {
+                  const isSafe = stat.percentage >= 75;
+                  return (
+                    <div 
+                      key={stat.id}
+                      className="bg-[#0B1120] rounded-3xl p-5 sm:p-6 shadow-2xl shadow-black/40 border border-white/5 flex flex-col justify-between"
+                    >
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-start gap-3">
+                          <div className="min-w-0">
+                            <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider">Course Subject</span>
+                            <h4 className="text-base sm:text-lg font-bold text-white mt-0.5 break-words leading-snug">{stat.subjectName}</h4>
                           </div>
-
-                          {/* Numeric Progress Bar */}
-                          <div className="space-y-2 min-w-0">
-                            <div className="flex flex-wrap justify-between items-end gap-1.5 text-xs font-semibold">
-                              <span className="text-slate-400 font-sans font-bold">Attended: {stat.present}/{stat.total} slots</span>
-                              <span className={`font-bold text-sm ${isSafe ? "text-emerald-400" : "text-rose-450"}`}>
-                                {stat.percentage.toFixed(1)}%
-                              </span>
-                            </div>
-                            <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-white/[0.03]">
-                              <div
-                                className={`h-full rounded-full transition-all duration-350 ${isSafe ? "bg-emerald-500" : "bg-rose-500"}`}
-                                style={{ width: `${Math.min(stat.percentage, 100)}%` }}
-                              />
-                            </div>
+                          
+                          <div className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-extrabold tracking-wider uppercase border whitespace-nowrap ${
+                            isSafe 
+                              ? "bg-emerald-950/20 border-emerald-900/50 text-emerald-400"
+                              : "bg-rose-950/20 border-rose-900/50 text-rose-450"
+                          }`}>
+                            {isSafe ? "Safe" : "Below Requirement"}
                           </div>
                         </div>
 
-                        {/* Mathematical Estimation Box */}
-                        <div className={`mt-4 sm:mt-5 p-3 sm:p-3.5 rounded-2xl text-xs flex gap-3 border min-w-0 ${
-                          isSafe
-                            ? "bg-slate-900/40 border-white/[0.03] text-slate-350"
-                            : "bg-rose-950/10 border-rose-900/20 text-rose-350"
-                        }`}>
-                          {isSafe ? (
-                            <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400 shrink-0 mt-0.5" />
-                          ) : (
-                            <AlertCircle className="w-4.5 h-4.5 text-rose-450 shrink-0 mt-0.5" />
-                          )}
-                          <span className="font-medium leading-relaxed break-words">{stat.calculationText}</span>
+                        {/* Numeric Progress Bar */}
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-end text-xs font-semibold gap-2">
+                            <span className="text-slate-400 font-sans font-bold">Attended: {stat.present}/{stat.total} slots</span>
+                            <span className={`shrink-0 ${isSafe ? "text-emerald-400 font-bold" : "text-rose-450 font-bold"}`}>
+                              {stat.percentage.toFixed(1)}%
+                            </span>
+                          </div>
+                          <div className="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden border border-white/[0.03]">
+                            <div 
+                              className={`h-full rounded-full transition-all duration-350 ${isSafe ? "bg-emerald-500" : "bg-rose-500"}`}
+                              style={{ width: `${Math.min(stat.percentage, 100)}%` }}
+                            />
+                          </div>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+
+                      {/* Mathematical Estimation Box */}
+                      <div className={`mt-5 p-3.5 rounded-2xl text-xs flex gap-3 border ${
+                        isSafe
+                          ? "bg-slate-900/40 border-white/[0.03] text-slate-350"
+                          : "bg-rose-950/10 border-rose-900/20 text-rose-350"
+                      }`}>
+                        {isSafe ? (
+                          <CheckCircle2 className="w-4.5 h-4.5 text-emerald-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <AlertCircle className="w-4.5 h-4.5 text-rose-450 shrink-0 mt-0.5" />
+                        )}
+                        <span className="font-medium leading-relaxed break-words">{stat.calculationText}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </section>
 
             {/* 4. Complete Batch Timetable Grid */}
@@ -363,4 +357,3 @@ export default function StudentDashboard({ session, onLogout, isDark, onThemeTog
     </div>
   );
 }
-
