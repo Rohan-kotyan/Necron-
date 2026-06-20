@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { 
-  Users, BookOpen, Calendar, Clock, BarChart3, ChevronRight, CheckCircle2, XCircle, Search, 
+import {
+  Users, BookOpen, Calendar, Clock, BarChart3, ChevronRight, CheckCircle2, XCircle, Search,
   ArrowLeft, Download, ShieldCheck, Printer, LogOut, Sun, Moon, AlertTriangle, FileSpreadsheet, Play
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import TimetableEditor from "./TimetableEditor";
 
 interface UserSession {
   token: string;
@@ -756,9 +757,9 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
               </motion.div>
             )}
 
-            {/* TAB #3: Timetables Display */}
+            {/* TAB #3: Timetable Editor (Lecturer can edit) */}
             {activeTab === "timetable" && (
-              <motion.div 
+              <motion.div
                 key="time"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -766,46 +767,13 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
               >
                 <div>
                   <h3 className="text-xl font-black text-white tracking-tight">University Timetable Scheme</h3>
-                  <p className="text-xs text-slate-450">Master timetable allocations. Edit slots below or contact Academic Dean.</p>
+                  <p className="text-xs text-slate-450">
+                    Master timetable allocations — full editorial control. Import
+                    the default Excel sheet, add custom slots, breaks, and subjects.
+                  </p>
                 </div>
 
-                <div className="bg-[#0B1120] border border-white/5 rounded-3xl overflow-hidden shadow-2xl">
-                  <div className="p-4 bg-slate-900/60 border-b border-white/5 flex justify-between items-center text-xs">
-                    <span className="font-bold text-slate-400 uppercase tracking-widest text-[10px]">Master batch A1 Timetable Registry</span>
-                  </div>
-
-                  <div className="overflow-x-auto text-xs sm:text-xs">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-slate-900/80 text-[10px] font-bold text-slate-450 uppercase tracking-widest border-b border-white/5">
-                          <th className="py-4 px-5">Time</th>
-                          <th className="py-4 px-5">Monday</th>
-                          <th className="py-4 px-5">Tuesday</th>
-                          <th className="py-4 px-5">Wednesday</th>
-                          <th className="py-4 px-5">Thursday</th>
-                          <th className="py-4 px-5">Friday</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/[0.03] text-slate-300 font-semibold">
-                        {[
-                          { time: "9:00 AM", mon: "Data Structures", tue: "Data Structures", wed: "Self Study", thu: "Self Study", fri: "Self Study" },
-                          { time: "10:00 AM", mon: "Artificial Intelligence", tue: "Artificial Intelligence", wed: "Self Study", thu: "Self Study", fri: "Artificial Intelligence" },
-                          { time: "11:00 AM", mon: "Machine Learning", tue: "Self Study", wed: "Machine Learning", thu: "Self Study", fri: "Self Study" },
-                          { time: "2:00 PM", mon: "Web Technology", tue: "Self Study", wed: "Self Study", thu: "Web Technology", fri: "Self Study" },
-                        ].map((row, idx) => (
-                          <tr key={idx} className="hover:bg-white/[0.02]">
-                            <td className="py-4 px-5 font-bold font-mono text-slate-400">{row.time}</td>
-                            <td className="py-4 px-5 text-white">{row.mon}</td>
-                            <td className="py-4 px-5 text-white">{row.tue}</td>
-                            <td className="py-4 px-5 text-white">{row.wed}</td>
-                            <td className="py-4 px-5 text-white">{row.thu}</td>
-                            <td className="py-4 px-5 text-white">{row.fri}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                <TimetableEditor role="lecturer" />
               </motion.div>
             )}
 

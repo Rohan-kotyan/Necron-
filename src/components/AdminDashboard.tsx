@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { 
-  ShieldCheck, Users, UserPlus, BookOpen, Calendar, Clock, BarChart3, Trash, Plus, 
+import {
+  ShieldCheck, Users, UserPlus, BookOpen, Calendar, Clock, BarChart3, Trash, Plus,
   Search, ShieldAlert, LogOut, Sun, Moon, CheckCircle2, AlertCircle, FileText, Settings
 } from "lucide-react";
 import { motion } from "motion/react";
+import TimetableEditor from "./TimetableEditor";
 
 interface UserSession {
   token: string;
@@ -541,41 +542,9 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
                 </div>
               </div>
 
-              {/* Master Weekly period layout display */}
-              <div className="border-t border-white/5 pt-8 space-y-4 text-xs">
-                <h4 className="text-sm font-bold tracking-tight text-slate-400 uppercase">Master Class Timetable schedule Grid (Batch A1)</h4>
-                
-                <div className="bg-[#0B1120] border border-white/5 rounded-3xl p-5 overflow-x-auto text-[13px] shadow-2xl">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-900/60 text-[10px] font-bold text-slate-450 uppercase tracking-widest border-b border-white/5">
-                        <th className="py-4 px-5">Time</th>
-                        <th className="py-4 px-5">Monday</th>
-                        <th className="py-4 px-5">Tuesday</th>
-                        <th className="py-4 px-5">Wednesday</th>
-                        <th className="py-4 px-5">Thursday</th>
-                        <th className="py-4 px-5">Friday</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/[0.03] text-slate-300 font-semibold">
-                      {[
-                        { time: "9:00 AM", mon: "Data Structures", tue: "Data Structures", wed: "Self Study", thu: "Self Study", fri: "Self Study" },
-                        { time: "10:00 AM", mon: "Artificial Intelligence", tue: "Artificial Intelligence", wed: "Self Study", thu: "Self Study", fri: "Artificial Intelligence" },
-                        { time: "11:00 AM", mon: "Machine Learning", tue: "Self Study", wed: "Machine Learning", thu: "Self Study", fri: "Self Study" },
-                        { time: "2:00 PM", mon: "Web Technology", tue: "Self Study", wed: "Self Study", thu: "Web Technology", fri: "Self Study" },
-                      ].map((row, idx) => (
-                        <tr key={idx} className="hover:bg-white/[0.02]">
-                          <td className="py-4 px-5 font-bold font-mono text-slate-400">{row.time}</td>
-                          <td className="py-4 px-5 text-white">{row.mon}</td>
-                          <td className="py-4 px-5 text-white">{row.tue}</td>
-                          <td className="py-4 px-5 text-white">{row.wed}</td>
-                          <td className="py-4 px-5 text-white">{row.thu}</td>
-                          <td className="py-4 px-5 text-white">{row.fri}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+              {/* Master Timetable Editor — full role-based editorial control */}
+              <div className="border-t border-white/5 pt-8">
+                <TimetableEditor role="admin" />
               </div>
 
             </div>

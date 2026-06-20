@@ -53,11 +53,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (role === "lecturer") {
       const supabase = getSupabase();
-      const { data: lecturer, error } = await supabase
+      const result: any = await supabase
         .from("lecturers")
         .select("*")
         .ilike("email", email)
         .single();
+      const lecturer: any = result.data;
+      const error = result.error;
 
       if (error) {
         // .single() throws when 0 or >1 rows match — log for visibility, but
@@ -78,11 +80,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (role === "student") {
       const supabase = getSupabase();
-      const { data: student, error } = await supabase
+      const result: any = await supabase
         .from("students")
         .select("*")
         .or(`email.ilike.${email},registration_number.ilike.${email}`)
         .single();
+      const student: any = result.data;
+      const error = result.error;
 
       if (error) {
         console.warn("[login] student lookup failed:", error.message);

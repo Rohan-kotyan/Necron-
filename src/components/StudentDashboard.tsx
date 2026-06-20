@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { 
+import {
   User, Award, Calendar, BookOpen, Clock, AlertCircle, CheckCircle2, TrendingUp, LogOut, Moon, Sun, Download, FileText
 } from "lucide-react";
 import { motion } from "motion/react";
 import StudentCharts from "./StudentCharts";
+import TimetableView from "./TimetableView";
+import { apiFetch } from "../lib/apiFetch";
+import type { TimetableEntry } from "../types";
 
 interface UserSession {
   token: string;
@@ -31,6 +34,10 @@ export default function StudentDashboard({ session, onLogout, isDark, onThemeTog
   const [timetable, setTimetable] = useState<any[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // New timetable state — populated from the role-aware /api/timetable endpoint
+  const [ttEntries, setTtEntries] = useState<TimetableEntry[]>([]);
+  const [ttLoading, setTtLoading] = useState(true);
+  const [ttError, setTtError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadStudentData() {
@@ -56,6 +63,29 @@ export default function StudentDashboard({ session, onLogout, isDark, onThemeTog
     }
     loadStudentData();
   }, [user.batch, user.id]);
+
+  // Load timetable from the new role-aware /api/timetable endpoint (sends JWT).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setTtLoading(true);
+      setTtError(null);
+      try {
+        const data = await apiFetch<{ timetable: TimetableEntry[] }>(
+          "/api/timetable"
+        );
+        if (!cancelled) setTtEntries(data.timetable || []);
+      } catch (err: any) {
+        if (!cancelled)
+          setTtError(err.message || "Could not load the timetable.");
+      } finally {
+        if (!cancelled) setTtLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user.batch]);
 
   // Compute subject-by-subject statistics
   const subjectStats = subjects.map((sub) => {
@@ -286,54 +316,19 @@ export default function StudentDashboard({ session, onLogout, isDark, onThemeTog
                   <Calendar className="w-4.5 h-4.5 text-indigo-400" />
                   <span>Timetable Registry (Batch {user.batch})</span>
                 </h3>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-300 bg-indigo-500/10 border border-indigo-500/30 px-3 py-1.5 rounded-full">
+                  Read-only · Student View
+                </span>
               </div>
 
-              <div className="bg-[#0B1120] rounded-3xl shadow-2xl shadow-black/20 border border-white/5 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-900/60 text-slate-400 text-[10px] font-bold tracking-widest uppercase border-b border-white/5">
-                        <th className="py-4 px-5">Time Slot</th>
-                        <th className="py-4 px-5">Monday</th>
-                        <th className="py-4 px-5">Tuesday</th>
-                        <th className="py-4 px-5">Wednesday</th>
-                        <th className="py-4 px-5">Thursday</th>
-                        <th className="py-4 px-5">Friday</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/[0.03] text-xs sm:text-xs.1 font-semibold text-slate-300">
-                      {[
-                        { time: "9:00 AM", mon: "Data Structures", tue: "Data Structures", wed: "Self Study", thu: "Self Study", fri: "Self Study" },
-                        { time: "10:00 AM", mon: "Artificial Intelligence", tue: "Artificial Intelligence", wed: "Self Study", thu: "Self Study", fri: "Artificial Intelligence" },
-                        { time: "11:00 AM", mon: "Machine Learning", tue: "Self Study", wed: "Machine Learning", thu: "Self Study", fri: "Self Study" },
-                        { time: "2:00 PM", mon: "Web Technology", tue: "Self Study", wed: "Self Study", thu: "Web Technology", fri: "Self Study" },
-                      ].map((row, idx) => (
-                        <tr key={idx} className="hover:bg-slate-900/20 transition-all">
-                          <td className="py-4 px-5 font-bold font-mono text-slate-400 flex items-center gap-1.5">
-                            <Clock className="w-3.5 h-3.5 text-indigo-400" />
-                            {row.time}
-                          </td>
-                          <td className="py-4 px-5">
-                            <span className={row.mon.includes("Self") ? "text-slate-600 font-medium" : "font-semibold text-white text-xs"}>{row.mon}</span>
-                          </td>
-                          <td className="py-4 px-5">
-                            <span className={row.tue.includes("Self") ? "text-slate-600 font-medium" : "font-semibold text-white text-xs"}>{row.tue}</span>
-                          </td>
-                          <td className="py-4 px-5">
-                            <span className={row.wed.includes("Self") ? "text-slate-600 font-medium" : "font-semibold text-white text-xs"}>{row.wed}</span>
-                          </td>
-                          <td className="py-4 px-5">
-                            <span className={row.thu.includes("Self") ? "text-slate-600 font-medium" : "font-semibold text-white text-xs"}>{row.thu}</span>
-                          </td>
-                          <td className="py-4 px-5">
-                            <span className={row.fri.includes("Self") ? "text-slate-600 font-medium" : "font-semibold text-white text-xs"}>{row.fri}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              <TimetableView
+                entries={ttEntries}
+                loading={ttLoading}
+                error={ttError}
+                badge={`Batch ${user.batch}`}
+                initialBatch={user.batch}
+                batches={[user.batch]}
+              />
             </section>
           </>
         )}
