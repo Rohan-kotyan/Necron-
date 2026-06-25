@@ -90,11 +90,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Primary path: bcrypt hash
         if (lecturer.password_hash) {
           ok = await verifyPassword(password, lecturer.password_hash);
+          if (!ok) {
+            // Legacy SHA-256 HMAC migration path
+            const crypto = await import("crypto");
+            const legacyHash = crypto
+              .createHmac("sha256", "veritas_legacy_migration_v1")
+              .update(password)
+              .digest("hex");
+            if (legacyHash === lecturer.password_hash) {
+              ok = true;
+              const { hashPassword } = await import("./_password");
+              const newHash = await hashPassword(password);
+              await supabase
+                .from("lecturers")
+                .update({ password_hash: newHash, password: null })
+                .eq("id", lecturer.id);
+            }
+          }
         }
-        // Migration path: legacy plaintext (one-time, then upgrade)
+        // Older legacy: plaintext password column
         else if (lecturer.password && safeEqual(password, lecturer.password)) {
           ok = true;
-          // Upgrade to bcrypt hash immediately
           const { hashPassword } = await import("./_password");
           const newHash = await hashPassword(password);
           await supabase
@@ -121,12 +137,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ─── STUDENT LOGIN ─────────────────────────────────────────────
     if (role === "student") {
-      // Student can log in with either email OR registration number.
-      // Use OR with exact `.eq()` on each — never ilike (wildcard injection).
+      // Students log in with their REGISTRATION NUMBER only (not email).
+      // Email is stored in Supabase for record-keeping but is NOT used for login.
+      // Use exact `.eq()` lookup — never ilike (wildcard injection).
+      const regNum = String(email).trim().toUpperCase();
       const { data: student, error } = await supabase
         .from("students")
         .select("id, name, email, registration_number, batch, specialization, password_hash, password")
-        .or(`email.eq.${normalizedEmail},registration_number.eq.${String(email).trim()}`)
+        .eq("registration_number", regNum)
         .maybeSingle();
 
       if (error) {
@@ -137,8 +155,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let ok = false;
       if (student) {
         if (student.password_hash) {
+          // Try bcrypt first (the new format)
           ok = await verifyPassword(password, student.password_hash);
+          if (!ok) {
+            // Try the legacy SHA-256 HMAC format (from the SQL migration)
+            // migrate_legacy_passwords.sql stored:
+            //   encode(hmac(password, 'veritas_legacy_migration_v1', 'sha256'), 'hex')
+            const crypto = await import("crypto");
+            const legacyHash = crypto
+              .createHmac("sha256", "veritas_legacy_migration_v1")
+              .update(password)
+              .digest("hex");
+            if (legacyHash === student.password_hash) {
+              ok = true;
+              // Upgrade to bcrypt immediately
+              const { hashPassword } = await import("./_password");
+              const newHash = await hashPassword(password);
+              await supabase
+                .from("students")
+                .update({ password_hash: newHash, password: null })
+                .eq("id", student.id);
+            }
+          }
         } else if (student.password && safeEqual(password, student.password)) {
+          // Even older legacy: plaintext password column
           ok = true;
           const { hashPassword } = await import("./_password");
           const newHash = await hashPassword(password);

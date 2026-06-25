@@ -437,7 +437,7 @@ export default function LoginPortal({ onLoginSuccess }: LoginPortalProps) {
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
               <label className="block text-xs font-bold text-slate-400 tracking-widest uppercase mb-1.5">
-                {role === "student" ? "Reg Number or Email" : "Staff Email"}
+                {role === "student" ? "Registration Number" : "Staff Email"}
               </label>
               <div className="relative">
                 <span className="absolute left-3.5 top-3 text-slate-500">
@@ -492,7 +492,7 @@ export default function LoginPortal({ onLoginSuccess }: LoginPortalProps) {
               <Lock className="w-3.5 h-3.5 shrink-0 mt-0.5 text-indigo-400" />
               <div>
                 <p className="font-bold text-slate-200">Authorized access only</p>
-                <p>Student? Use your registration number or email. Staff & admin accounts are provisioned by the administrator. Forgot your password? Use the link above.</p>
+                <p>Students: log in with your registration number (e.g. 03SU25ML001). Staff & admin accounts are provisioned by the administrator. Forgot your password? Use the link above.</p>
               </div>
             </div>
 
