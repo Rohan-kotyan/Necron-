@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from "react";
 import {
-  ShieldCheck, Users, UserPlus, BookOpen, Calendar, Clock, BarChart3, Trash, Plus,
-  Search, ShieldAlert, LogOut, Sun, Moon, CheckCircle2, AlertCircle, FileText, Settings
+  ShieldCheck, Users, UserPlus, BookOpen, Calendar, Clock, BarChart3, Trash,
+  Search, LogOut, CheckCircle2, AlertCircle, Settings
 } from "lucide-react";
 import { motion } from "motion/react";
 import TimetableEditor from "./TimetableEditor";
+import { apiFetch } from "../lib/apiFetch";
 
 interface UserSession {
   token: string;
@@ -23,7 +24,7 @@ interface AdminDashboardProps {
   onThemeToggle: () => void;
 }
 
-export default function AdminDashboard({ session, onLogout, isDark, onThemeToggle }: AdminDashboardProps) {
+export default function AdminDashboard({ session, onLogout }: AdminDashboardProps) {
   const [activeTab, setActiveTab] = useState<"people" | "academics" | "ledger">("people");
   const [students, setStudents] = useState<any[]>([]);
   const [lecturers, setLecturers] = useState<any[]>([]);
@@ -31,9 +32,9 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
   const [timetable, setTimetable] = useState<any[]>([]);
   const [attendanceLogs, setAttendanceLogs] = useState<any[]>([]);
   
-  // Adding forms
-  const [newLecturer, setNewLecturer] = useState({ name: "", email: "", password: "password" });
-  const [newStudent, setNewStudent] = useState({ name: "", email: "", password: "password", registrationNumber: "", batch: "A1", specialization: "AI & ML" as 'AI & ML' | 'SD' | 'MV' });
+  // Adding forms — no default password (was "password"). Admin must set one.
+  const [newLecturer, setNewLecturer] = useState({ name: "", email: "", password: "" });
+  const [newStudent, setNewStudent] = useState({ name: "", email: "", password: "", registrationNumber: "", batch: "A1", specialization: "AI & ML" as 'AI & ML' | 'SD' | 'MV' });
   const [newSubject, setNewSubject] = useState({ name: "", lecturerId: "" });
   const [newTimetable, setNewTimetable] = useState({ batch: "A1", day: "Monday" as any, time: "9:00 AM", subjectId: "" });
 
@@ -41,7 +42,7 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
   const [toast, setToast] = useState<{ text: string; type: "success" | "error" } | null>(null);
 
   useEffect(() => {
-    loadAdminData();
+    loadAdminData(activeTab);
   }, [activeTab]);
 
   const showToast = (text: string, type: "success" | "error" = "success") => {
@@ -49,49 +50,58 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
     setTimeout(() => setToast(null), 3000);
   };
 
-  const loadAdminData = async () => {
+  // Scope loads to the active tab — previously this re-fetched EVERYTHING
+  // (students + lecturers + subjects + full attendance history) on every
+  // tab switch, which was slow and unnecessary.
+  const loadAdminData = async (tab: "people" | "academics" | "ledger") => {
     try {
-      const [studRes, lectRes, subRes, attRes] = await Promise.all([
-        fetch("/api/data?type=students"),
-        fetch("/api/data?type=lecturers"),
-        fetch("/api/data?type=subjects"),
-        fetch("/api/attendance?type=history"),
-      ]);
+      const tasks: Promise<any>[] = [];
+      const setters: ((data: any) => void)[] = [];
 
-      const studData = await studRes.json();
-      const lectData = await lectRes.json();
-      const subData = await subRes.json();
-      const attData = await attRes.json();
+      if (tab === "people") {
+        tasks.push(apiFetch<{ students: any[] }>("/api/data?type=students"));
+        setters.push((d) => setStudents(d.students || []));
+        tasks.push(apiFetch<{ lecturers: any[] }>("/api/data?type=lecturers"));
+        setters.push((d) => setLecturers(d.lecturers || []));
+      }
+      if (tab === "academics") {
+        tasks.push(apiFetch<{ subjects: any[] }>("/api/data?type=subjects"));
+        setters.push((d) => setSubjects(d.subjects || []));
+        tasks.push(apiFetch<{ lecturers: any[] }>("/api/data?type=lecturers"));
+        setters.push((d) => setLecturers(d.lecturers || []));
+      }
+      if (tab === "ledger") {
+        tasks.push(apiFetch<{ history: any[] }>("/api/attendance?type=history"));
+        setters.push((d) => setAttendanceLogs(d.history || []));
+      }
 
-      setStudents(studData.students || []);
-      setLecturers(lectData.lecturers || []);
-      setSubjects(subData.subjects || []);
-      setAttendanceLogs(attData.history || []);
-    } catch (err) {
-      console.error("Failed to load administration data", err);
+      const results = await Promise.all(tasks);
+      results.forEach((r, i) => setters[i](r));
+    } catch (err: any) {
+      showToast(err.message || "Failed to load administration data", "error");
     }
   };
 
   // 1. ADD LECTURER
   const handleAddLecturer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newLecturer.name || !newLecturer.email) {
-      showToast("Please complete lecturer credentials", "error");
+    if (!newLecturer.name || !newLecturer.email || !newLecturer.password) {
+      showToast("Please complete lecturer credentials (name, email, password)", "error");
+      return;
+    }
+    if (newLecturer.password.length < 6) {
+      showToast("Password must be at least 6 characters", "error");
       return;
     }
 
     try {
-      const res = await fetch("/api/admin/lecturers", {
+      await apiFetch("/api/admin/lecturers", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newLecturer)
+        body: newLecturer,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed");
-
       showToast("Lecturer staff member registered successfully!");
-      setNewLecturer({ name: "", email: "", password: "password" });
-      loadAdminData();
+      setNewLecturer({ name: "", email: "", password: "" });
+      loadAdminData("people");
     } catch (err: any) {
       showToast(err.message, "error");
     }
@@ -101,36 +111,34 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
   const handleRemoveLecturer = async (id: string) => {
     if (!confirm("Are you sure you want to remove this Lecturer staff member?")) return;
     try {
-      const res = await fetch(`/api/admin/lecturers?id=${id}`, { method: "DELETE" });
-      if (res.ok) {
-        showToast("Lecturer successfully purged.");
-        loadAdminData();
-      }
-    } catch (err) {
-      showToast("Failed to remove lecturer", "error");
+      await apiFetch(`/api/admin/lecturers?id=${id}`, { method: "DELETE" });
+      showToast("Lecturer successfully removed.");
+      loadAdminData("people");
+    } catch (err: any) {
+      showToast(err.message || "Failed to remove lecturer", "error");
     }
   };
 
   // 3. ADD STUDENT
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStudent.name || !newStudent.email || !newStudent.registrationNumber) {
-      showToast("Please complete student profile details", "error");
+    if (!newStudent.name || !newStudent.email || !newStudent.registrationNumber || !newStudent.password) {
+      showToast("Please complete student profile details (including password)", "error");
+      return;
+    }
+    if (newStudent.password.length < 6) {
+      showToast("Password must be at least 6 characters", "error");
       return;
     }
 
     try {
-      const res = await fetch("/api/admin/students", {
+      await apiFetch("/api/admin/students", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newStudent)
+        body: newStudent,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed");
-
       showToast("Student profile successfully initialized!");
-      setNewStudent({ name: "", email: "", password: "password", registrationNumber: "", batch: "A1", specialization: "AI & ML" });
-      loadAdminData();
+      setNewStudent({ name: "", email: "", password: "", registrationNumber: "", batch: "A1", specialization: "AI & ML" });
+      loadAdminData("people");
     } catch (err: any) {
       showToast(err.message, "error");
     }
@@ -140,13 +148,11 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
   const handleRemoveStudent = async (id: string) => {
     if (!confirm("Are you sure you want to remove this student? (This deletes historical attendance records associated with them!)")) return;
     try {
-      const res = await fetch(`/api/admin/students?id=${id}`, { method: "DELETE" });
-      if (res.ok) {
-        showToast("Student purged successfully from ERP Database.");
-        loadAdminData();
-      }
-    } catch (err) {
-      showToast("Failed to remove student records", "error");
+      await apiFetch(`/api/admin/students?id=${id}`, { method: "DELETE" });
+      showToast("Student removed from ERP database.");
+      loadAdminData("people");
+    } catch (err: any) {
+      showToast(err.message || "Failed to remove student records", "error");
     }
   };
 
@@ -159,18 +165,15 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
     }
 
     try {
-      const res = await fetch("/api/admin/timetable", {
+      await apiFetch("/api/admin/timetable", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "subject", ...newSubject })
+        body: { type: "subject", ...newSubject },
       });
-      if (res.ok) {
-        showToast("Subject Course added successfully.");
-        setNewSubject({ name: "", lecturerId: "" });
-        loadAdminData();
-      }
-    } catch (err) {
-      showToast("Failed to create subject", "error");
+      showToast("Subject Course added successfully.");
+      setNewSubject({ name: "", lecturerId: "" });
+      loadAdminData("academics");
+    } catch (err: any) {
+      showToast(err.message || "Failed to create subject", "error");
     }
   };
 
@@ -300,13 +303,15 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
                       />
                     </div>
                     <div>
-                      <label className="block text-slate-400 font-bold uppercase tracking-wider mb-1">Default Password</label>
+                      <label className="block text-slate-400 font-bold uppercase tracking-wider mb-1">Initial Password (min 6 chars)</label>
                       <input
                         type="password"
                         required
+                        minLength={6}
                         value={newLecturer.password}
                         onChange={(e) => setNewLecturer(prev => ({ ...prev, password: e.target.value }))}
-                        className="w-full p-2.5 rounded-xl border border-white/5 bg-[#0F172A] text-slate-205 focus:outline-none focus:border-indigo-505 mt-1"
+                        placeholder="Set a strong password"
+                        className="w-full p-2.5 rounded-xl border border-white/5 bg-[#0F172A] text-slate-200 focus:outline-none focus:border-indigo-500 mt-1"
                       />
                     </div>
                     <button
@@ -422,7 +427,19 @@ export default function AdminDashboard({ session, onLogout, isDark, onThemeToggl
                           value={newStudent.email}
                           onChange={(e) => setNewStudent(prev => ({ ...prev, email: e.target.value }))}
                           placeholder="liam@college.edu"
-                          className="w-full p-2.5 rounded-xl border border-white/5 bg-[#0F172A] text-slate-205 focus:outline-none focus:border-indigo-550 mt-1"
+                          className="w-full p-2.5 rounded-xl border border-white/5 bg-[#0F172A] text-slate-200 focus:outline-none focus:border-indigo-500 mt-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 font-bold uppercase tracking-wider mb-1">Initial Password (min 6 chars)</label>
+                        <input
+                          type="password"
+                          required
+                          minLength={6}
+                          value={newStudent.password}
+                          onChange={(e) => setNewStudent(prev => ({ ...prev, password: e.target.value }))}
+                          placeholder="Set a strong password"
+                          className="w-full p-2.5 rounded-xl border border-white/5 bg-[#0F172A] text-slate-200 focus:outline-none focus:border-indigo-500 mt-1"
                         />
                       </div>
                       <button

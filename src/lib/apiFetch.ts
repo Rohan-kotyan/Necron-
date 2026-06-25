@@ -1,10 +1,10 @@
 /**
- * Tiny fetch wrapper that always sends the JWT Authorization header when the
- * user is logged in. Used by the timetable components.
+ * Fetch wrapper that always sends the JWT Authorization header when the
+ * user is logged in. Used by every authenticated API call.
  *
- * Why a wrapper? The rest of the codebase sends NO auth headers, but the
- * timetable module enforces role-based access on the backend (per spec).
- * Without this wrapper, every /api/admin/timetable* call would 401.
+ * On 401 (token expired/invalid), automatically clears the session and
+ * reloads to the login screen — previously the user would see "logged-in"
+ * UI with every API call silently failing.
  */
 
 const SESSION_KEY = "veritas_user_session";
@@ -17,6 +17,14 @@ export function getToken(): string | null {
     return parsed?.token ?? null;
   } catch {
     return null;
+  }
+}
+
+export function clearSession(): void {
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -65,6 +73,16 @@ export async function apiFetch<T = any>(
         `Server returned a non-JSON response (HTTP ${res.status}).`
       );
     }
+  }
+
+  // Handle 401: token expired or invalid. Auto-logout.
+  if (res.status === 401 && auth) {
+    clearSession();
+    // Soft redirect — gives the user a chance to see any error toast first.
+    setTimeout(() => {
+      window.location.reload();
+    }, 50);
+    throw new Error(data?.error || "Your session has expired. Please log in again.");
   }
 
   if (!res.ok) {

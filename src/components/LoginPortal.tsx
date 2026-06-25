@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { User, Lock, Award, ShieldAlert, AlertCircle, Eye, EyeOff, Mail, Hash, Layers, GraduationCap, CheckCircle2 } from "lucide-react";
+import { User, Lock, AlertCircle, Eye, EyeOff, Mail, Hash, Layers, GraduationCap, CheckCircle2 } from "lucide-react";
 import { motion } from "motion/react";
 
 interface LoginPortalProps {
@@ -23,6 +23,12 @@ export default function LoginPortal({ onLoginSuccess }: LoginPortalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forgotSent, setForgotSent] = useState(false);
+  const [forgotToken, setForgotToken] = useState<string | null>(null);
+  const [forgotRole, setForgotRole] = useState<string | null>(null);
+  const [showResetForm, setShowResetForm] = useState(false);
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [resettingPassword, setResettingPassword] = useState(false);
 
   // Sign-up only fields (students)
   const [signupName, setSignupName] = useState("");
@@ -178,16 +184,76 @@ export default function LoginPortal({ onLoginSuccess }: LoginPortalProps) {
     }
   };
 
-  const triggerForgotPassword = () => {
+  const triggerForgotPassword = async () => {
     if (!email) {
-      setError("Please enter your email/username below first.");
+      setError("Please enter your email address below first.");
       return;
     }
-    setForgotSent(true);
+    setLoading(true);
     setError(null);
-    setTimeout(() => {
+    try {
+      const response = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to request reset.");
+      }
+      setForgotSent(true);
+      // Email isn't configured in this deployment, so the API returns the
+      // token directly. Show it so the user can paste it into the reset form.
+      if (data?.token) {
+        setForgotToken(data.token);
+        setForgotRole(data.role || null);
+      }
+    } catch (err: any) {
+      setError(err?.message || "Failed to request password reset.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetToken || !newPassword) {
+      setError("Token and new password are required.");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setError("Password must be at least 6 characters long.");
+      return;
+    }
+    setResettingPassword(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: resetToken,
+          newPassword,
+          role: forgotRole,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error || "Failed to reset password.");
+      }
+      setShowResetForm(false);
       setForgotSent(false);
-    }, 5000);
+      setForgotToken(null);
+      setResetToken("");
+      setNewPassword("");
+      setError(null);
+      // Show a temporary success state — the user can now log in.
+      alert("Password reset successfully! You can now log in with your new password.");
+    } catch (err: any) {
+      setError(err?.message || "Failed to reset password.");
+    } finally {
+      setResettingPassword(false);
+    }
   };
 
   return (
@@ -284,8 +350,72 @@ export default function LoginPortal({ onLoginSuccess }: LoginPortalProps) {
             className="mb-6 p-4 rounded-xl bg-emerald-950/20 border border-emerald-900/40 flex gap-3 text-emerald-400 text-xs leading-relaxed"
           >
             <User className="w-4.5 h-4.5 shrink-0" />
-            <span>A temporary reset token has been dispatched to your verified registrar email.</span>
+            <div className="space-y-2">
+              <span>A reset token has been generated for your account.</span>
+              {forgotToken && (
+                <>
+                  <p className="text-[10px] text-slate-400">
+                    Email delivery is not configured on this deployment. Use the token below to reset your password:
+                  </p>
+                  <code className="block font-mono text-[10px] bg-slate-900 border border-white/10 px-2 py-1 rounded break-all text-amber-300">
+                    {forgotToken}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetToken(forgotToken);
+                      setShowResetForm(true);
+                    }}
+                    className="text-indigo-400 hover:text-indigo-300 font-bold cursor-pointer"
+                  >
+                    Click here to reset password →
+                  </button>
+                </>
+              )}
+            </div>
           </motion.div>
+        )}
+
+        {/* Reset Password form */}
+        {showResetForm && (
+          <motion.form
+            onSubmit={handleResetPassword}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-4 mb-6 p-4 bg-slate-950/60 rounded-xl border border-white/[0.05]"
+          >
+            <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Reset Password</h3>
+            <input
+              type="text"
+              value={resetToken}
+              onChange={(e) => setResetToken(e.target.value)}
+              placeholder="Paste reset token here"
+              className="w-full p-2.5 rounded-xl border border-white/5 bg-[#0B1120] text-slate-100 text-xs font-mono focus:outline-none focus:border-indigo-500"
+            />
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="New password (min 6 chars)"
+              className="w-full p-2.5 rounded-xl border border-white/5 bg-[#0B1120] text-slate-100 text-xs focus:outline-none focus:border-indigo-500"
+            />
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={resettingPassword}
+                className="flex-1 p-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl cursor-pointer transition"
+              >
+                {resettingPassword ? "Resetting..." : "Reset Password"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowResetForm(false)}
+                className="p-2.5 bg-slate-900 hover:bg-white/5 text-slate-300 text-xs font-bold rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </motion.form>
         )}
 
         {/* Sign-up success Toast */}
@@ -359,10 +489,8 @@ export default function LoginPortal({ onLoginSuccess }: LoginPortalProps) {
             <div className="p-4 bg-slate-950/60 rounded-xl border border-white/[0.03] flex gap-2.5 text-[11px] text-slate-400 leading-relaxed">
               <Lock className="w-3.5 h-3.5 shrink-0 mt-0.5 text-indigo-400" />
               <div>
-                <p className="font-bold text-slate-200">ERP quick-start demo keys:</p>
-                {role === "student" && <p>Reg: <span className="font-mono bg-slate-900 px-1 py-0.5 rounded text-white border border-white/5">03SU25ML001</span> or <span className="font-mono bg-slate-900 px-1 py-0.5 rounded text-white border border-white/5">rohandd36@gmail.com</span> (Pwd: <span className="text-white">password</span>)</p>}
-                {role === "lecturer" && <p>Mail: <span className="font-mono bg-slate-900 px-1 py-0.5 rounded text-white border border-white/5">lecturer@college.edu</span> (Pwd: <span className="text-white">password</span>)</p>}
-                {role === "admin" && <p>Mail: <span className="font-mono bg-slate-900 px-1 py-0.5 rounded text-white border border-white/5">admin@college.edu</span> (Pwd: <span className="text-white">password</span>)</p>}
+                <p className="font-bold text-slate-200">Authorized access only</p>
+                <p>Student? Use your registration number or email. Staff & admin accounts are provisioned by the administrator. Forgot your password? Use the link above.</p>
               </div>
             </div>
 

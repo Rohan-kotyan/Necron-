@@ -2,12 +2,10 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import jwt from "jsonwebtoken";
 
 /**
- * Shared auth helper for timetable endpoints.
+ * Shared auth helpers for ALL endpoints.
  *
- * The rest of the codebase does NOT verify JWTs — but the timetable module
- * was explicitly requested to enforce role-based access on the BACKEND as
- * well as the frontend. This helper is the single source of truth for that
- * enforcement.
+ * Previously only the timetable module used these. Now every endpoint that
+ * touches sensitive data (data, attendance, admin/*) goes through them too.
  */
 
 export type Role = "student" | "lecturer" | "admin";
@@ -23,10 +21,12 @@ export interface AuthContext {
   registrationNumber?: string;
 }
 
-function getJwtSecret(): string {
+export function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error("JWT_SECRET is not configured on this deployment.");
+  if (!secret || secret.length < 16) {
+    throw new Error(
+      "JWT_SECRET is not configured or is too short (need at least 16 chars)."
+    );
   }
   return secret;
 }
@@ -36,7 +36,8 @@ function getJwtSecret(): string {
  * Returns null on missing/invalid token (caller decides how to respond).
  */
 export function readAuthContext(req: VercelRequest): AuthContext | null {
-  const header = req.headers["authorization"] || req.headers["Authorization"];
+  // Node lowercases all header names; the second branch is dead but harmless.
+  const header = req.headers["authorization"];
   if (!header || typeof header !== "string") return null;
   const match = header.match(/^Bearer\s+(.+)$/i);
   if (!match) return null;
@@ -73,7 +74,6 @@ export function requireAuth(req: VercelRequest, res: VercelResponse): AuthContex
 /**
  * Require an authenticated session with one of the allowed roles.
  * Sends 401 (no auth) or 403 (wrong role) JSON on failure.
- * Students are denied write access; lecturers and admins are allowed.
  */
 export function requireRole(
   req: VercelRequest,
@@ -93,3 +93,6 @@ export function requireRole(
 
 /** Roles that may edit the timetable (used by all write endpoints). */
 export const TIMETABLE_EDITOR_ROLES: Role[] = ["lecturer", "admin"];
+
+/** Roles with admin-level access. */
+export const ADMIN_ROLES: Role[] = ["admin"];

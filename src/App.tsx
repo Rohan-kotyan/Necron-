@@ -9,24 +9,44 @@ export default function App() {
   const [session, setSession] = useState<any | null>(null);
   const [isDark, setIsDark] = useState<boolean>(true); // default dark
 
-  // Load session from localStorage on startup
+  // Load session from localStorage on startup.
   useEffect(() => {
     const cached = localStorage.getItem("veritas_user_session");
     if (cached) {
       try {
-        setSession(JSON.parse(cached));
-      } catch (err) {
+        const parsed = JSON.parse(cached);
+        // Defensive: check token expiry client-side so an expired token
+        // doesn't leave the user "logged in" with failing API calls.
+        if (parsed?.token) {
+          const parts = parsed.token.split(".");
+          if (parts.length === 3) {
+            try {
+              const payload = JSON.parse(atob(parts[1]));
+              const exp = payload?.exp ? payload.exp * 1000 : 0;
+              if (exp && exp > Date.now()) {
+                setSession(parsed);
+              } else {
+                localStorage.removeItem("veritas_user_session");
+              }
+            } catch {
+              setSession(parsed);
+            }
+          } else {
+            setSession(parsed);
+          }
+        }
+      } catch {
         localStorage.removeItem("veritas_user_session");
       }
     }
-    
-    // Apply dark mode skin
+
+    // Apply theme.
     const savedTheme = localStorage.getItem("veritas_theme");
     const preferDark = savedTheme ? savedTheme === "dark" : true;
     setIsDark(preferDark);
   }, []);
 
-  // Sync theme changes with body class for standard styling
+  // Sync theme changes with <html> class for Tailwind `dark:` variants.
   useEffect(() => {
     if (isDark) {
       document.documentElement.classList.add("dark");
@@ -63,25 +83,25 @@ export default function App() {
             transition={{ duration: 0.35 }}
           >
             {session.user.role === "student" && (
-              <StudentDashboard 
-                session={session} 
-                onLogout={handleLogout} 
+              <StudentDashboard
+                session={session}
+                onLogout={handleLogout}
                 isDark={isDark}
                 onThemeToggle={toggleTheme}
               />
             )}
             {session.user.role === "lecturer" && (
-              <LecturerDashboard 
-                session={session} 
-                onLogout={handleLogout} 
+              <LecturerDashboard
+                session={session}
+                onLogout={handleLogout}
                 isDark={isDark}
                 onThemeToggle={toggleTheme}
               />
             )}
             {session.user.role === "admin" && (
-              <AdminDashboard 
-                session={session} 
-                onLogout={handleLogout} 
+              <AdminDashboard
+                session={session}
+                onLogout={handleLogout}
                 isDark={isDark}
                 onThemeToggle={toggleTheme}
               />

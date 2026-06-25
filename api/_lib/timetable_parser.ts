@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import { getSupabase, nextId } from "../_db";
+import { hashPassword } from "../_password";
 
 /**
  * Excel parser + DB seeder for the timetable module.
@@ -148,7 +149,13 @@ export function parseTimetableXlsx(buffer: Buffer): ParsedTimetable {
     const firstCell = String(row[0] ?? "").trim();
     const day = normalizeDay(firstCell);
 
-    if (firstCell.toLowerCase().startsWith("day/time") || firstCell.toLowerCase().startsWith("day/time")) {
+    const lowerFirst = firstCell.toLowerCase();
+    if (
+      lowerFirst.startsWith("day/time") ||
+      lowerFirst.startsWith("day / time") ||
+      lowerFirst.startsWith("day - time") ||
+      lowerFirst.startsWith("day\\time")
+    ) {
       // Header row — collect the time slots
       currentTimeSlots = [];
       for (let i = 2; i < row.length; i++) {
@@ -241,13 +248,18 @@ export async function seedTimetableFromParsed(parsed: ParsedTimetable): Promise<
   lecturers: number;
   subjects: number;
   entries: number;
+  skippedSubjects: string[];
+  skippedEntries: number;
 }> {
   const supabase = getSupabase();
+  const skippedSubjects: string[] = [];
+  let skippedEntries = 0;
 
   // 1. Lecturers — fetch existing by name, insert missing.
+  // Don't select password_hash (not needed here, and reduces payload).
   const { data: existingLecturers } = await supabase
     .from("lecturers")
-    .select("id, name, email, password");
+    .select("id, name, email");
   const lecturerByName = new Map<string, { id: string }>();
   for (const l of existingLecturers || []) {
     lecturerByName.set(l.name.toLowerCase(), { id: l.id });
@@ -255,10 +267,32 @@ export async function seedTimetableFromParsed(parsed: ParsedTimetable): Promise<
   for (const name of parsed.lecturers) {
     if (!lecturerByName.has(name.toLowerCase())) {
       const id = await nextId("LECT", "lecturers");
-      const email = `${name.toLowerCase().replace(/[^a-z.]/g, "")}@srinivas.edu.in`;
+      // Build a unique email by appending a numeric suffix on collision.
+      // The old code stripped all non-[a-z.] chars which made "John" and
+      // "John D" both map to john@srinivas.edu.in.
+      const baseLocalPart = name
+        .toLowerCase()
+        .replace(/[^a-z.]/g, "")
+        .replace(/\.+/g, ".")
+        .replace(/^\.|\.$/g, "") || "lecturer";
+      let email = `${baseLocalPart}@srinivas.edu.in`;
+      let suffix = 2;
+      while (
+        Array.from(lecturerByName.values()).some(
+          (l) => l.id.toLowerCase() === email.toLowerCase()
+        )
+      ) {
+        email = `${baseLocalPart}${suffix}@srinivas.edu.in`;
+        suffix++;
+      }
+      // Generate a random strong password instead of literal "password".
+      const randomPwd =
+        Math.random().toString(36).slice(2, 10) +
+        Math.random().toString(36).slice(2, 10).toUpperCase();
+      const passwordHash = await hashPassword(randomPwd);
       const { data, error } = await supabase
         .from("lecturers")
-        .insert({ id, name, email, password: "password" })
+        .insert({ id, name, email, password_hash: passwordHash })
         .select("id, name")
         .single();
       if (!error && data) {
@@ -281,8 +315,11 @@ export async function seedTimetableFromParsed(parsed: ParsedTimetable): Promise<
         subj.lecturerName && lecturerByName.has(subj.lecturerName.toLowerCase())
           ? lecturerByName.get(subj.lecturerName.toLowerCase())!.id
           : null;
-      // Skip if we couldn't resolve a lecturer (we'll assign BREAK-like subjects separately)
-      if (!lecturerId) continue;
+      // Skip if we couldn't resolve a lecturer — record why for the caller.
+      if (!lecturerId) {
+        skippedSubjects.push(subj.name);
+        continue;
+      }
       const id = await nextId("SUB", "subjects");
       const { data, error } = await supabase
         .from("subjects")
@@ -300,20 +337,24 @@ export async function seedTimetableFromParsed(parsed: ParsedTimetable): Promise<
     await supabase.from("timetable").delete().in("batch", parsed.batches);
   }
 
-  // 4. Insert timetable entries.
+  // 4. Insert timetable entries using sequence-based IDs.
   const rows: { id: string; batch: string; day: string; time: string; subject_id: string }[] = [];
-  let n = ((await supabase.from("timetable").select("*", { count: "exact", head: true })).count || 0) + 1;
   for (const r of parsed.rows) {
     let subjectId: string;
     if (r.isBreak) {
       subjectId = "BREAK";
     } else {
       const found = subjectByName.get(r.subjectName.toLowerCase());
-      if (!found) continue; // skip if subject couldn't be created (no lecturer)
+      if (!found) {
+        skippedSubjects.push(r.subjectName);
+        skippedEntries++;
+        continue; // skip if subject couldn't be created (no lecturer)
+      }
       subjectId = found.id;
     }
+    const id = await nextId("TT", "timetable");
     rows.push({
-      id: `TT${String(n++).padStart(3, "0")}`,
+      id,
       batch: r.batch,
       day: r.day,
       time: r.time,
@@ -337,5 +378,7 @@ export async function seedTimetableFromParsed(parsed: ParsedTimetable): Promise<
     lecturers: lecturerByName.size,
     subjects: subjectByName.size,
     entries: rows.length,
+    skippedSubjects: Array.from(new Set(skippedSubjects)),
+    skippedEntries,
   };
 }

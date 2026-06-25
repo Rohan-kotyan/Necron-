@@ -6,3 +6,14 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# TypeScript
+*.tsbuildinfo
+
+# Vercel
+.vercel/
+
+# Editor
+.vscode/
+.idea/
+*.swp

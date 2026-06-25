@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Users, BookOpen, Calendar, Clock, BarChart3, ChevronRight, CheckCircle2, XCircle, Search,
-  ArrowLeft, Download, ShieldCheck, Printer, LogOut, Sun, Moon, AlertTriangle, FileSpreadsheet, Play
+  ArrowLeft, Download, ShieldCheck, Printer, LogOut, AlertTriangle, FileSpreadsheet, Play
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import TimetableEditor from "./TimetableEditor";
+import { apiFetch } from "../lib/apiFetch";
+import type { TimetableEntry } from "../types";
 
 interface UserSession {
   token: string;
@@ -23,154 +25,229 @@ interface LecturerDashboardProps {
   onThemeToggle: () => void;
 }
 
-export default function LecturerDashboard({ session, onLogout, isDark, onThemeToggle }: LecturerDashboardProps) {
+export default function LecturerDashboard({ session, onLogout }: LecturerDashboardProps) {
   const { user } = session;
   const [activeTab, setActiveTab] = useState<"take_attendance" | "reports" | "timetable">("take_attendance");
 
-  // Step state for attendance taking
-  const [batchStep, setBatchStep] = useState<number>(1); // 1: Sel Batch, 2: Sel Subject, 3: Sel Specialization, 4: Calling screen, 5: Summary
+  const [batchStep, setBatchStep] = useState<number>(1);
   const [selectedBatch, setSelectedBatch] = useState<string>("");
   const [selectedSubject, setSelectedSubject] = useState<any>(null);
   const [selectedSpecialization, setSelectedSpecialization] = useState<string>("");
 
-  // DB States
   const [studentsList, setStudentsList] = useState<any[]>([]);
   const [subjectsList, setSubjectsList] = useState<any[]>([]);
+  const [timetableList, setTimetableList] = useState<TimetableEntry[]>([]);
   const [callingIndex, setCallingIndex] = useState<number>(0);
-  const [records, setRecords] = useState<{ [studentId: string]: 'Present' | 'Absent' }>({});
+  // Records: undefined = unmarked, "Present" | "Absent" = marked.
+  // Old code defaulted everyone to "Present" which silently faked attendance.
+  const [records, setRecords] = useState<{ [studentId: string]: 'Present' | 'Absent' | undefined }>({});
   const [savingAttendance, setSavingAttendance] = useState(false);
   const [saveComplete, setSaveComplete] = useState(false);
-  
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   // Reporting states
   const [searchQuery, setSearchQuery] = useState("");
   const [attendanceHistory, setAttendanceHistory] = useState<any[]>([]);
   const [reportSubjectFilter, setReportSubjectFilter] = useState("all");
   const [reportBatchFilter, setReportBatchFilter] = useState("all");
+  const [loadingData, setLoadingData] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
 
-  const batches = ["A1", "A2", "A3", "A4"];
-
-  // Selections timetables for displays
-  const batch1Timetable = [
-    { time: "9:00 AM", subj: "Data Structures", id: "SUB001" },
-    { time: "10:00 AM", subj: "Artificial Intelligence", id: "SUB002" },
-    { time: "11:00 AM", subj: "Machine Learning", id: "SUB003" },
-    { time: "2:00 PM", subj: "Web Technology", id: "SUB004" }
-  ];
-
-  // Load backend states
+  // Load subjects + attendance history ONCE on mount — previously this was
+  // re-fetching on every batchStep change AND every activeTab change.
   useEffect(() => {
-    async function initDB() {
+    let cancelled = false;
+    (async () => {
+      setLoadingData(true);
+      setDataError(null);
       try {
         const [subsRes, histRes] = await Promise.all([
-          fetch("/api/data?type=subjects"),
-          fetch("/api/attendance?type=history")
+          apiFetch<{ subjects: any[] }>("/api/data?type=subjects"),
+          apiFetch<{ history: any[] }>("/api/attendance?type=history"),
         ]);
-        const subsData = await subsRes.json();
-        const histData = await histRes.json();
-        setSubjectsList(subsData.subjects || []);
-        setAttendanceHistory(histData.history || []);
-      } catch (err) {
-        console.error("Failed to load states", err);
+        if (cancelled) return;
+        setSubjectsList(subsRes.subjects || []);
+        setAttendanceHistory(histRes.history || []);
+      } catch (err: any) {
+        if (!cancelled) setDataError(err.message || "Failed to load data.");
+      } finally {
+        if (!cancelled) setLoadingData(false);
       }
-    }
-    initDB();
-  }, [batchStep, activeTab]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  // Fetch student rosters for batch step 4
+  // Load the timetable for the selected batch when the lecturer enters Step 2.
+  // This replaces the hardcoded `batch1Timetable` of fake subjects.
+  const batchSubjects = useMemo(() => {
+    if (!selectedBatch) return [];
+    return timetableList
+      .filter((t) => t.batch === selectedBatch && t.subjectId !== "BREAK")
+      .map((t) => ({
+        id: t.subjectId,
+        name: t.subjectName || t.subjectId,
+        time: t.time,
+        day: t.day,
+      }));
+  }, [timetableList, selectedBatch]);
+
+  useEffect(() => {
+    if (batchStep === 2 && selectedBatch) {
+      apiFetch<{ timetable: TimetableEntry[] }>(
+        `/api/timetable?batch=${encodeURIComponent(selectedBatch)}`
+      )
+        .then((data) => setTimetableList(data.timetable || []))
+        .catch((err) => console.error("Failed to load timetable for batch", err));
+    }
+  }, [batchStep, selectedBatch]);
+
+  // Today's classes — derived from the real timetable for today's weekday.
+  // Replaces the hardcoded "Artificial Intelligence · Batch A1 · Monday 10:00 AM" cards.
+  const todayClasses = useMemo(() => {
+    const today = new Date().toLocaleDateString("en-US", { weekday: "long" });
+    return timetableList
+      .filter((t) => t.day === today && t.subjectId !== "BREAK")
+      .slice(0, 6)
+      .map((t) => ({
+        id: t.id,
+        subjectName: t.subjectName || t.subjectId,
+        batch: t.batch,
+        time: t.time,
+        lecturerName: t.lecturerName,
+      }));
+  }, [timetableList]);
+
+  // Fetch student roster for the selected batch + specialization.
   const fetchActiveRoster = async () => {
     try {
-      const url = `/api/data?type=students&batch=${selectedBatch}&specialization=${encodeURIComponent(selectedSpecialization)}`;
-      const res = await fetch(url);
-      const data = await res.json();
+      const data = await apiFetch<{ students: any[] }>(
+        `/api/data?type=students&batch=${encodeURIComponent(selectedBatch)}&specialization=${encodeURIComponent(selectedSpecialization)}`
+      );
       const loadedStudents = data.students || [];
       setStudentsList(loadedStudents);
-      
-      // Initialize all to present by default so edits are easy
-      const initial: { [key: string]: 'Present' | 'Absent' } = {};
+
+      // Default to UNMARKED — old code defaulted to "Present" which silently
+      // recorded every student as present if the lecturer navigated away.
+      const initial: { [key: string]: 'Present' | 'Absent' | undefined } = {};
       loadedStudents.forEach((s: any) => {
-        initial[s.id] = 'Present';
+        initial[s.id] = undefined;
       });
       setRecords(initial);
       setCallingIndex(0);
       setBatchStep(4);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to load roster", err);
+      setSaveError(err.message || "Failed to load roster.");
     }
   };
 
-  // Submit to actual backend
+  // Submit attendance to the backend. Fixed:
+  //   • Use LOCAL date (UTC caused wrong-day bucketing).
+  //   • Surface server errors via saveError (old code silently swallowed !res.ok).
+  //   • Only include students that were actually marked.
   const saveAttendanceToDatabase = async () => {
-    setSavingAttendance(true);
-    try {
-      const formattedRecords = Object.keys(records).map(studentId => ({
-        studentId,
-        status: records[studentId]
-      }));
+    // Require explicit marking — refuse to save if any student is unmarked.
+    const unmarkedCount = Object.values(records).filter((v) => v === undefined).length;
+    if (unmarkedCount > 0) {
+      setSaveError(`${unmarkedCount} student(s) are not yet marked. Mark everyone as Present or Absent before saving.`);
+      return;
+    }
 
-      const res = await fetch("/api/attendance", {
+    setSavingAttendance(true);
+    setSaveError(null);
+    try {
+      const formattedRecords = Object.keys(records)
+        .filter((sid) => records[sid] !== undefined)
+        .map((studentId) => ({
+          studentId,
+          status: records[studentId] as 'Present' | 'Absent',
+        }));
+
+      // Local date in YYYY-MM-DD — NOT new Date().toISOString() which is UTC
+      // and lands on the wrong day in timezones east of UTC for late classes.
+      const now = new Date();
+      const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+      await apiFetch("/api/attendance", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: {
           subjectId: selectedSubject.id,
-          date: new Date().toISOString().split("T")[0],
+          date: localDate,
           batch: selectedBatch,
           specialization: selectedSpecialization,
-          records: formattedRecords
-        })
+          records: formattedRecords,
+        },
       });
 
-      if (res.ok) {
-        setSaveComplete(true);
-        // Reset process
-        setTimeout(() => {
-          setBatchStep(1);
-          setSelectedBatch("");
-          setSelectedSubject(null);
-          setSelectedSpecialization("");
-          setSaveComplete(false);
-        }, 2000);
-      }
-    } catch (err) {
-      console.error("Failed to submit attendance", err);
+      setSaveComplete(true);
+      setSaveError(null);
+      setTimeout(() => {
+        setBatchStep(1);
+        setSelectedBatch("");
+        setSelectedSubject(null);
+        setSelectedSpecialization("");
+        setRecords({});
+        setSaveComplete(false);
+      }, 2000);
+
+      // Refresh history in the background.
+      apiFetch<{ history: any[] }>("/api/attendance?type=history")
+        .then((data) => setAttendanceHistory(data.history || []))
+        .catch(() => {});
+    } catch (err: any) {
+      // Surface the error — old code silently swallowed failures.
+      setSaveError(err.message || "Failed to save attendance.");
     } finally {
       setSavingAttendance(false);
     }
   };
 
-  // Calling index action
   const markIndividualStudent = (status: 'Present' | 'Absent') => {
     const student = studentsList[callingIndex];
     if (student) {
-      setRecords(prev => ({ ...prev, [student.id]: status }));
+      setRecords((prev) => ({ ...prev, [student.id]: status }));
     }
-
     if (callingIndex < studentsList.length - 1) {
       setCallingIndex(callingIndex + 1);
     } else {
-      // Done, move to summary step
       setBatchStep(5);
     }
   };
 
-  // Calculations
   const totalInBatch = studentsList.length;
-  const presentCount = Object.values(records).filter(v => v === 'Present').length;
-  const absentCount = totalInBatch - presentCount;
+  const markedCount = Object.values(records).filter((v) => v !== undefined).length;
+  const presentCount = Object.values(records).filter((v) => v === 'Present').length;
+  const absentCount = Object.values(records).filter((v) => v === 'Absent').length;
   const attendancePct = totalInBatch > 0 ? (presentCount / totalInBatch) * 100 : 0;
 
-  // Formatting Excel/CSV download helper
+  // CSV export with injection-safe escaping. Cells starting with = + - @ are
+  // prefixed with a single quote so Excel/Sheets doesn't evaluate them.
+  const csvEscape = (val: any): string => {
+    if (val == null) return "";
+    const s = String(val);
+    if (/^[=+\-@]/.test(s)) return `'${s}`;
+    if (s.includes('"') || s.includes(',') || s.includes('\n')) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+
   const exportToCSV = () => {
-    let headers = "Date,Student ID,Student Name,Reg No,Batch,Specialization,Subject,Status,Lecturer\n";
-    const filteredHistory = attendanceHistory.filter(h => {
-      const matchesSearch = h.studentName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const headers = "Date,Student ID,Student Name,Reg No,Batch,Specialization,Subject,Status,Lecturer\n";
+    const filteredHistory = attendanceHistory.filter((h) => {
+      const matchesSearch = h.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                             h.registrationNumber.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesSubj = reportSubjectFilter === "all" || h.subjectId === reportSubjectFilter;
       const matchesBatch = reportBatchFilter === "all" || h.batch === reportBatchFilter;
       return matchesSearch && matchesSubj && matchesBatch;
     });
 
-    const rows = filteredHistory.map(h => 
-      `"${h.date}","${h.studentId}","${h.studentName}","${h.registrationNumber}","${h.batch}","${h.specialization}","${h.subjectName}","${h.status}","${h.lecturerName}"`
+    const rows = filteredHistory.map((h) =>
+      [h.date, h.studentId, h.studentName, h.registrationNumber, h.batch, h.specialization, h.subjectName, h.status, h.lecturerName]
+        .map(csvEscape)
+        .join(",")
     ).join("\n");
 
     const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
@@ -185,8 +262,7 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
 
   return (
     <div className="min-h-screen bg-[#0F172A] text-slate-200 transition-colors duration-300 font-sans">
-      
-      {/* Top Navbar */}
+
       <header className="bg-[#0B1120]/90 backdrop-blur-md border-b border-white/5 px-6 py-4 sticky top-0 z-30 print:hidden flex justify-between items-center shadow-lg shadow-black/20">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
@@ -211,10 +287,14 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
         </div>
       </header>
 
-      {/* Primary Container */}
+      {dataError && (
+        <div className="p-4 m-4 rounded-xl bg-rose-950/20 border border-rose-900/40 text-rose-400 text-xs">
+          {dataError}
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto p-4 sm:p-6 flex flex-col md:flex-row gap-6">
-        
-        {/* Navigation Sidebar Panel */}
+
         <aside className="w-full md:w-64 shrink-0 bg-[#0B1120] rounded-3xl p-4 shadow-2xl border border-white/5 space-y-2 h-fit print:hidden">
           <div className="text-[10px] uppercase font-bold text-slate-400 tracking-widest px-3 py-2 mb-1">
             Operation Desk
@@ -259,20 +339,19 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
           </button>
         </aside>
 
-        {/* Dynamic Center Stage */}
         <main className="flex-1 bg-[#111827] rounded-3xl p-6 shadow-2xl border border-white/5">
-          
+
           <AnimatePresence mode="wait">
-            {/* TAB #1: Take Attendance step-by-step workflow */}
-            {activeTab === "take_attendance" &&               <motion.div
+            {/* TAB #1: Take Attendance */}
+            {activeTab === "take_attendance" && (
+              <motion.div
                 key="take"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 className="space-y-6"
               >
-                {/* Step indicators */}
-                <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 border-b border-white/5 pb-4">
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 border-b border-white/5 pb-4 flex-wrap">
                   <span className={batchStep >= 1 ? "text-indigo-400 font-bold" : ""}>Step 1: Batch</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                   <span className={batchStep >= 2 ? "text-indigo-400 font-bold" : ""}>Step 2: Subject</span>
@@ -284,7 +363,7 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                   <span className={batchStep === 5 ? "text-indigo-400 font-bold" : ""}>Step 5: Done</span>
                 </div>
 
-                {/* ===== STEP 1: Select Batch ===== */}
+                {/* STEP 1: Select Batch */}
                 {batchStep === 1 && (
                   <div className="space-y-5">
                     <div className="space-y-1">
@@ -293,7 +372,7 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      {batches.map((b) => (
+                      {["A1", "A2", "A3", "A4"].map((b) => (
                         <button
                           key={b}
                           type="button"
@@ -312,34 +391,32 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                       ))}
                     </div>
 
-                    {/* Today's Classes List (ERP UI component) */}
+                    {/* Today's Classes — derived from real timetable */}
                     <div className="pt-6 border-t border-white/5 space-y-3">
                       <h4 className="text-xs font-bold tracking-wider uppercase text-slate-400">Your Classes Scheduled Today</h4>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs leading-relaxed">
-                        <div className="p-3 bg-[#0B1120] rounded-xl border border-white/5 flex items-center justify-between">
-                          <div className="flex items-center gap-2.5">
-                            <Clock className="w-4 h-4 text-indigo-400" />
-                            <div>
-                              <p className="font-bold text-white">Artificial Intelligence</p>
-                              <p className="font-semibold text-[10px] text-slate-400">Batch A1 • Monday 10:00 AM</p>
+                      {todayClasses.length === 0 ? (
+                        <p className="text-xs text-slate-500">No classes scheduled today.</p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs leading-relaxed">
+                          {todayClasses.map((c) => (
+                            <div key={c.id} className="p-3 bg-[#0B1120] rounded-xl border border-white/5 flex items-center justify-between">
+                              <div className="flex items-center gap-2.5">
+                                <Clock className="w-4 h-4 text-indigo-400" />
+                                <div>
+                                  <p className="font-bold text-white">{c.subjectName}</p>
+                                  <p className="font-semibold text-[10px] text-slate-400">Batch {c.batch} • {c.time}</p>
+                                </div>
+                              </div>
+                              <span className="text-[10px] font-bold bg-amber-500/10 border border-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded uppercase">Active</span>
                             </div>
-                          </div>
-                          <span className="text-[10px] font-bold bg-amber-500/10 border border-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded uppercase">Active</span>
+                          ))}
                         </div>
-                        <div className="p-3 bg-[#0B1120] rounded-xl border border-white/5 flex items-center justify-between">
-                          <div className="flex items-center gap-2.5">
-                            <Clock className="w-4 h-4 text-slate-500" />
-                            <div>
-                              <p className="font-bold text-slate-350">Machine Learning</p>
-                              <p className="font-semibold text-[10px] text-slate-40s">Batch A1 • Monday 11:00 AM</p>
-                            </div>
-                          </div>
-                          <span className="text-[10px] font-bold bg-white/5 text-slate-400 px-1.5 py-0.5 rounded uppercase">Scheduled</span>
-                        </div>
-                      </div>
+                      )}
                     </div>
                   </div>
-                )}                  {/* ===== STEP 2: Selected Batch Timetable & Subject ===== */}
+                )}
+
+                {/* STEP 2: Select Subject from REAL timetable */}
                 {batchStep === 2 && (
                   <div className="space-y-6">
                     <div className="flex items-center gap-3">
@@ -355,36 +432,39 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                       </div>
                     </div>
 
-                    {/* Batch timetable selection list */}
                     <div className="space-y-3">
                       <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Schedule List for Batch {selectedBatch}</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                        {batch1Timetable.map((row) => (
-                          <button
-                            key={row.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedSubject(subjectsList.find(s => s.id === row.id) || { id: row.id, name: row.subj });
-                            }}
-                            className={`p-4 rounded-xl border text-left flex items-start justify-between cursor-pointer transition ${
-                              selectedSubject?.id === row.id
-                                ? "bg-indigo-950/20 border-indigo-500 text-indigo-400"
-                                : "border-white/5 hover:bg-white/5"
-                            }`}
-                          >
-                            <div className="space-y-1">
-                              <span className="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded text-indigo-400 font-bold border border-white/5">
-                                {row.id}
+                      {batchSubjects.length === 0 ? (
+                        <p className="text-xs text-slate-500 p-6 text-center bg-[#0B1120] rounded-xl border border-white/5">
+                          No subjects found for this batch's timetable. Import the timetable first.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                          {batchSubjects.map((row) => (
+                            <button
+                              key={row.id}
+                              type="button"
+                              onClick={() => setSelectedSubject(row)}
+                              className={`p-4 rounded-xl border text-left flex items-start justify-between cursor-pointer transition ${
+                                selectedSubject?.id === row.id
+                                  ? "bg-indigo-950/20 border-indigo-500 text-indigo-400"
+                                  : "border-white/5 hover:bg-white/5"
+                              }`}
+                            >
+                              <div className="space-y-1">
+                                <span className="font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded text-indigo-400 font-bold border border-white/5">
+                                  {row.id}
+                                </span>
+                                <h4 className="font-bold text-sm text-white">{row.name}</h4>
+                              </div>
+                              <span className="text-xs font-semibold text-slate-400 flex items-center gap-1">
+                                <Clock className="w-3.5 h-3.5 text-indigo-400" />
+                                {row.time}
                               </span>
-                              <h4 className="font-bold text-sm text-white">{row.subj}</h4>
-                            </div>
-                            <span className="text-xs font-semibold text-slate-400 flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5 text-indigo-455" />
-                              {row.time}
-                            </span>
-                          </button>
-                        ))}
-                      </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {selectedSubject && (
@@ -403,7 +483,9 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                       </motion.div>
                     )}
                   </div>
-                )}                  {/* ===== STEP 3: Specialization Screen ===== */}
+                )}
+
+                {/* STEP 3: Specialization */}
                 {batchStep === 3 && (
                   <div className="space-y-6">
                     <div className="flex items-center gap-3">
@@ -423,14 +505,12 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                       {[
                         { title: "AI & ML", desc: "Artificial Intelligence & Machine Learning Stream" },
                         { title: "SD", desc: "Software Development Track" },
-                        { title: "MV", desc: "Metaverse & XR Technologies" }
+                        { title: "MV", desc: "Metaverse & XR Technologies" },
                       ].map((spec) => (
                         <button
                           key={spec.title}
                           type="button"
-                          onClick={() => {
-                            setSelectedSpecialization(spec.title);
-                          }}
+                          onClick={() => setSelectedSpecialization(spec.title)}
                           className={`p-6 rounded-2xl border text-left cursor-pointer transition ${
                             selectedSpecialization === spec.title
                               ? "bg-[#0B1120] border-indigo-500 text-indigo-400"
@@ -454,23 +534,23 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                       </div>
                     )}
                   </div>
-                )}                  {/* ===== STEP 4: Calling Screen ===== */}
+                )}
+
+                {/* STEP 4: Calling Screen */}
                 {batchStep === 4 && studentsList[callingIndex] && (
                   <div className="space-y-6 select-none">
                     <div className="flex justify-between items-center text-xs font-bold text-slate-400 uppercase tracking-widest pb-3 border-b border-white/5">
                       <span>Roster Calling Page</span>
-                      <span>Student {callingIndex + 1} of {studentsList.length}</span>
+                      <span>Student {callingIndex + 1} of {studentsList.length} • Marked: {markedCount}</span>
                     </div>
 
-                    {/* Progress indicator */}
                     <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-white/[0.03]">
-                      <div 
+                      <div
                         className="h-full bg-indigo-500 transition-all duration-300"
-                        style={{ width: `${((callingIndex) / studentsList.length) * 100}%` }}
+                        style={{ width: `${(callingIndex / studentsList.length) * 100}%` }}
                       />
                     </div>
 
-                    {/* Centered Active Student Card */}
                     <AnimatePresence mode="popLayout">
                       <motion.div
                         key={studentsList[callingIndex].id}
@@ -491,14 +571,13 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                           <h4 className="text-2.5xl font-black tracking-tight text-white">
                             {studentsList[callingIndex].name}
                           </h4>
-                          <p className="text-xs text-slate-405 font-bold uppercase tracking-wider">
+                          <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">
                             Speciality: {studentsList[callingIndex].specialization}
                           </p>
                         </div>
                       </motion.div>
                     </AnimatePresence>
 
-                    {/* Calling Present/Absent action buttons */}
                     <div className="grid grid-cols-2 gap-4">
                       <button
                         onClick={() => markIndividualStudent('Present')}
@@ -512,7 +591,7 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                         onClick={() => markIndividualStudent('Absent')}
                         className="py-4 rounded-2xl bg-rose-950/40 text-rose-400 border border-rose-900/40 hover:bg-rose-900/45 text-white font-extrabold text-md cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-rose-900/10 focus:outline-none transition"
                       >
-                        <XCircle className="w-5 h-5 text-rose-450" />
+                        <XCircle className="w-5 h-5 text-rose-400" />
                         <span>ABSENT</span>
                       </button>
                     </div>
@@ -527,8 +606,7 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                     </div>
                   </div>
                 )}
-                
-                {/* Fallback no students matching */}
+
                 {batchStep === 4 && studentsList.length === 0 && (
                   <div className="text-center p-12 space-y-4">
                     <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto" />
@@ -538,14 +616,14 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                     </div>
                     <button
                       onClick={() => setBatchStep(3)}
-                      className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200"
+                      className="px-4 py-2 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-900"
                     >
                       Go Back
                     </button>
                   </div>
                 )}
 
-                {/* ===== STEP 5: Summary Tab ===== */}
+                {/* STEP 5: Summary */}
                 {batchStep === 5 && (
                   <div className="space-y-6">
                     <div className="space-y-1">
@@ -553,7 +631,14 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                       <p className="text-xs text-slate-400">Roster completed. Please audit the numbers before saving to university records.</p>
                     </div>
 
-                    {/* Metrics grid */}
+                    {/* Save error */}
+                    {saveError && (
+                      <div className="p-4 rounded-xl bg-rose-950/20 border border-rose-900/40 text-rose-400 text-xs flex gap-3 items-start">
+                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <span>{saveError}</span>
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                       <div className="p-4 bg-slate-900/60 rounded-2xl border border-white/5 text-center">
                         <span className="text-2xl font-black text-white">{totalInBatch}</span>
@@ -564,7 +649,7 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                         <p className="text-[10px] tracking-wider font-extrabold text-slate-400 uppercase mt-0.5">Present count</p>
                       </div>
                       <div className="p-4 bg-rose-950/10 rounded-2xl border border-rose-900/20 text-center">
-                        <span className="text-2xl font-black text-rose-450">{absentCount}</span>
+                        <span className="text-2xl font-black text-rose-400">{absentCount}</span>
                         <p className="text-[10px] tracking-wider font-extrabold text-slate-400 uppercase mt-0.5">Absent count</p>
                       </div>
                       <div className="p-4 bg-indigo-950/10 rounded-2xl border border-indigo-900/20 text-center">
@@ -573,32 +658,35 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                       </div>
                     </div>
 
-                    {/* Simple list of student ticks for auditing */}
-                    <div className="bg-slate-905/30 rounded-2xl border border-white/5 overflow-hidden text-xs">
+                    <div className="bg-slate-900/30 rounded-2xl border border-white/5 overflow-hidden text-xs">
                       <div className="p-3 bg-slate-900 border-b border-white/5 font-bold uppercase tracking-widest text-[10px] text-slate-400">
                         Attendance Verification Ledgers ({selectedSpecialization})
                       </div>
                       <div className="max-h-52 overflow-y-auto divide-y divide-white/[0.03]">
                         {studentsList.map((stu) => (
-                           <div key={stu.id} className="p-3 flex items-center justify-between">
+                          <div key={stu.id} className="p-3 flex items-center justify-between">
                             <span className="font-semibold text-slate-200">{stu.name}</span>
-                            <span className="font-mono text-[10px] text-slate-450">{stu.registrationNumber}</span>
-                            
-                            {/* Inline Edit selector */}
+                            <span className="font-mono text-[10px] text-slate-400">{stu.registrationNumber}</span>
+
                             <select
-                              value={records[stu.id]}
-                              onChange={(e) => setRecords(prev => ({ ...prev, [stu.id]: e.target.value as 'Present' | 'Absent' }))}
+                              value={records[stu.id] || ""}
+                              onChange={(e) =>
+                                setRecords((prev) => ({
+                                  ...prev,
+                                  [stu.id]: (e.target.value || undefined) as 'Present' | 'Absent' | undefined,
+                                }))
+                              }
                               className="font-bold bg-[#0F172A] border border-white/5 text-slate-300 rounded px-2 py-1 text-[11px] focus:ring-1 focus:ring-indigo-500 cursor-pointer"
                             >
-                              <option value="Present">Present (Green)</option>
-                              <option value="Absent">Absent (Red)</option>
+                              <option value="">— Unmarked —</option>
+                              <option value="Present">Present</option>
+                              <option value="Absent">Absent</option>
                             </select>
                           </div>
                         ))}
                       </div>
                     </div>
 
-                    {/* Post verification actions */}
                     {saveComplete ? (
                       <motion.div
                         initial={{ opacity: 0, scale: 0.95 }}
@@ -612,7 +700,7 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                         <button
                           onClick={saveAttendanceToDatabase}
                           disabled={savingAttendance}
-                          className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl cursor-pointer shadow-lg transition"
+                          className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl cursor-pointer shadow-lg transition disabled:opacity-50"
                         >
                           {savingAttendance ? "Submitting Ledger..." : "Save Attendance"}
                         </button>
@@ -628,10 +716,11 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                   </div>
                 )}
               </motion.div>
-            }
-                      {/* TAB #2: Attendance Reports Database view */}
+            )}
+
+            {/* TAB #2: Reports */}
             {activeTab === "reports" && (
-              <motion.div 
+              <motion.div
                 key="rep"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -640,7 +729,7 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <h3 className="text-xl font-black text-white tracking-tight">Historical Attendance Logs</h3>
-                    <p className="text-xs text-slate-450">Search student indexes, filter batches/tracks, and export spreadsheets.</p>
+                    <p className="text-xs text-slate-400">Search student indexes, filter batches/tracks, and export spreadsheets.</p>
                   </div>
 
                   <div className="flex gap-2">
@@ -661,11 +750,9 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                   </div>
                 </div>
 
-                {/* Filter and Search controls */}
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-[#0B1120] p-4 rounded-3xl border border-white/5 text-xs text-slate-350">
-                  {/* Search query box */}
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-[#0B1120] p-4 rounded-3xl border border-white/5 text-xs text-slate-300">
                   <div className="sm:col-span-2 relative">
-                    <span className="absolute left-3.5 top-3 text-slate-450">
+                    <span className="absolute left-3.5 top-3 text-slate-400">
                       <Search className="w-4 h-4" />
                     </span>
                     <input
@@ -677,7 +764,6 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                     />
                   </div>
 
-                  {/* Filter Subject */}
                   <div>
                     <select
                       value={reportSubjectFilter}
@@ -685,11 +771,10 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                       className="w-full p-2.5 rounded-xl border border-white/5 bg-[#0F172A] font-bold cursor-pointer text-slate-200"
                     >
                       <option value="all">All Course Subjects</option>
-                      {subjectsList.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      {subjectsList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                   </div>
 
-                  {/* Filter Batch */}
                   <div>
                     <select
                       value={reportBatchFilter}
@@ -697,12 +782,11 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                       className="w-full p-2.5 rounded-xl border border-white/5 bg-[#0F172A] font-bold cursor-pointer text-slate-200"
                     >
                       <option value="all">All Batches (A1-A4)</option>
-                      {batches.map(b => <option key={b} value={b}>Batch {b}</option>)}
+                      {["A1", "A2", "A3", "A4"].map((b) => <option key={b} value={b}>Batch {b}</option>)}
                     </select>
                   </div>
                 </div>
 
-                {/* Main historical table array */}
                 <div className="bg-[#0B1120] rounded-3xl border border-white/5 overflow-hidden">
                   <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
@@ -716,34 +800,42 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
                           <th className="py-4 px-5">Status</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-white/[0.03] text-xs sm:text-xs">
-                        {attendanceHistory
-                          .filter(h => {
-                            const matchesSearch = h.studentName.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                                                  h.registrationNumber.toLowerCase().includes(searchQuery.toLowerCase());
-                            const matchesSubj = reportSubjectFilter === "all" || h.subjectId === reportSubjectFilter;
-                            const matchesBatch = reportBatchFilter === "all" || h.batch === reportBatchFilter;
-                            return matchesSearch && matchesSubj && matchesBatch;
-                          })
-                          .map((h) => (
-                            <tr key={h.id} className="hover:bg-white/[0.02] transition-all text-xs text-slate-305">
-                              <td className="py-4 px-5 font-mono text-slate-400 font-bold">{h.date}</td>
-                              <td className="py-4 px-5 font-bold text-white">{h.studentName}</td>
-                              <td className="py-4 px-5 font-mono font-bold text-indigo-400 bg-slate-900/40 px-2 py-0.5 rounded border border-white/5">{h.registrationNumber}</td>
-                              <td className="py-4 px-5 text-slate-400">{h.specialization}</td>
-                              <td className="py-4 px-5 font-bold text-white">{h.subjectName}</td>
-                              <td className="py-4 px-5">
-                                <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase ${
-                                  h.status === "Present"
-                                    ? "bg-emerald-950/20 text-emerald-400 border border-emerald-900/30"
-                                    : "bg-rose-950/20 text-rose-450 border border-rose-900/30"
-                                }`}>
-                                  {h.status}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        {attendanceHistory.length === 0 && (
+                      <tbody className="divide-y divide-white/[0.03] text-xs">
+                        {loadingData ? (
+                          <tr>
+                            <td colSpan={6} className="text-center p-8 text-slate-400">
+                              Loading...
+                            </td>
+                          </tr>
+                        ) : (
+                          attendanceHistory
+                            .filter((h) => {
+                              const matchesSearch = h.studentName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                h.registrationNumber.toLowerCase().includes(searchQuery.toLowerCase());
+                              const matchesSubj = reportSubjectFilter === "all" || h.subjectId === reportSubjectFilter;
+                              const matchesBatch = reportBatchFilter === "all" || h.batch === reportBatchFilter;
+                              return matchesSearch && matchesSubj && matchesBatch;
+                            })
+                            .map((h) => (
+                              <tr key={h.id} className="hover:bg-white/[0.02] transition-all text-xs text-slate-300">
+                                <td className="py-4 px-5 font-mono text-slate-400 font-bold">{h.date}</td>
+                                <td className="py-4 px-5 font-bold text-white">{h.studentName}</td>
+                                <td className="py-4 px-5 font-mono font-bold text-indigo-400 bg-slate-900/40 px-2 py-0.5 rounded border border-white/5">{h.registrationNumber}</td>
+                                <td className="py-4 px-5 text-slate-400">{h.specialization}</td>
+                                <td className="py-4 px-5 font-bold text-white">{h.subjectName}</td>
+                                <td className="py-4 px-5">
+                                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase ${
+                                    h.status === "Present"
+                                      ? "bg-emerald-950/20 text-emerald-400 border border-emerald-900/30"
+                                      : "bg-rose-950/20 text-rose-400 border border-rose-900/30"
+                                  }`}>
+                                    {h.status}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))
+                        )}
+                        {attendanceHistory.length === 0 && !loadingData && (
                           <tr>
                             <td colSpan={6} className="text-center p-12 text-slate-400 font-bold">
                               No historic lectures logged in this university term.
@@ -757,7 +849,7 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
               </motion.div>
             )}
 
-            {/* TAB #3: Timetable Editor (Lecturer can edit) */}
+            {/* TAB #3: Timetable */}
             {activeTab === "timetable" && (
               <motion.div
                 key="time"
@@ -767,9 +859,8 @@ export default function LecturerDashboard({ session, onLogout, isDark, onThemeTo
               >
                 <div>
                   <h3 className="text-xl font-black text-white tracking-tight">University Timetable Scheme</h3>
-                  <p className="text-xs text-slate-450">
-                    Master timetable allocations — full editorial control. Import
-                    the default Excel sheet, add custom slots, breaks, and subjects.
+                  <p className="text-xs text-slate-400">
+                    Master timetable allocations — full editorial control. Import the default Excel sheet, add custom slots, breaks, and subjects.
                   </p>
                 </div>
 

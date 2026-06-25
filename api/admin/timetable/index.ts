@@ -252,18 +252,45 @@ async function bulkInsert(req: VercelRequest, res: VercelResponse) {
   }
 
   const supabase = getSupabase();
-  // Fetch existing IDs so we don't collide with previously inserted rows.
-  const { count } = await supabase
-    .from("timetable")
-    .select("*", { count: "exact", head: true });
-  let n = (count || 0) + 1;
-  const rows = entries.map((e: any) => ({
-    id: `TT${String(n++).padStart(3, "0")}`,
-    batch: e.batch,
-    day: e.day,
-    time: e.time,
-    subject_id: e.subjectId,
-  }));
+
+  // Validate that all referenced subject_ids actually exist (unless BREAK).
+  // The old bulkInsert skipped this check, so it inserted arbitrary IDs
+  // and tripped FK errors with a confusing message.
+  const subjectIds = Array.from(
+    new Set(
+      entries
+        .map((e: any) => e.subjectId as string)
+        .filter((id) => id && id !== "BREAK")
+    )
+  );
+  if (subjectIds.length > 0) {
+    const { data: found, error: subErr } = await supabase
+      .from("subjects")
+      .select("id")
+      .in("id", subjectIds);
+    if (subErr) return res.status(500).json({ error: subErr.message });
+    const foundIds = new Set((found || []).map((s: any) => s.id));
+    const missing = subjectIds.filter((id) => !foundIds.has(id));
+    if (missing.length > 0) {
+      return res.status(400).json({
+        error: `Subject IDs do not exist: ${missing.join(", ")}. Create them first via type:"subject".`,
+      });
+    }
+  }
+
+  // Use the sequence-based nextId() for each row — eliminates the
+  // count-based collision that the old bulkInsert had.
+  const rows: { id: string; batch: string; day: string; time: string; subject_id: string }[] = [];
+  for (const e of entries) {
+    const id = await nextId("TT", "timetable");
+    rows.push({
+      id,
+      batch: e.batch,
+      day: e.day,
+      time: e.time,
+      subject_id: e.subjectId,
+    });
+  }
 
   const { data, error } = await supabase
     .from("timetable")

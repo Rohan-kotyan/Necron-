@@ -110,7 +110,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const supabase = getSupabase();
       const { error } = await supabase.from("timetable").delete().neq("id", "__never__");
       if (error) {
-        console.warn("[import] replaceAll wipe error:", error.message);
+        // Abort instead of warn-and-continue. Continuing would leave the DB
+        // in an inconsistent state and the subsequent insert could fail in
+        // confusing ways.
+        return res.status(500).json({
+          error: `Failed to wipe existing timetable rows: ${error.message}`,
+        });
       }
     }
 

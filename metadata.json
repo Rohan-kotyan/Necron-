@@ -1,6 +1,6 @@
 {
-  "name": "College Attendance Management System",
-  "description": "A comprehensive university-grade web system for managing batches, students, lecturers, timetables, and interactive attendance marking with real-time dashboards.",
+  "name": "Veritas ERP — College Attendance Management System",
+  "description": "A comprehensive university-grade web system for Srinivas University that manages batches, students, lecturers, subjects, weekly timetables, and interactive roll-call attendance marking with real-time role-based dashboards (Student / Lecturer / Admin) and analytics.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }

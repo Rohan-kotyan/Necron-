@@ -1,32 +1,32 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { createClient } from "@supabase/supabase-js";
 import jwt from "jsonwebtoken";
+import { getSupabase } from "./_db";
+import { getJwtSecret } from "./_auth";
+import { verifyPassword, safeEqual } from "./_password";
 
-// Lazily initialize Supabase/JWT so the module still loads if env vars are
-// missing (e.g. on a preview deployment without secrets). The handler will
-// return a clean 500 JSON instead of crashing on import.
-let _supabase: ReturnType<typeof createClient> | null = null;
-function getSupabase() {
-  if (_supabase) return _supabase;
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error("Supabase is not configured on this deployment.");
-  }
-  _supabase = createClient(url, key);
-  return _supabase;
-}
+/**
+ * POST /api/login
+ *   Body: { email, password, role: "student" | "lecturer" | "admin" }
+ *
+ * Returns: { token, user } on success; { error } on failure.
+ *
+ * Security notes:
+ *   • No hardcoded admin — admin accounts live in the `admins` table with
+ *     bcrypt-hashed passwords.
+ *   • Login uses exact-match `.eq()` lookups, NOT `ilike` — the old `ilike`
+ *     lookup allowed `%` wildcard injection that bypassed authentication
+ *     when combined with the default `"password"` seeding.
+ *   • Passwords are hashed (bcrypt); we never compare plaintext except as
+ *     a one-time migration fallback for legacy rows.
+ *   • On successful legacy-password login, the row is silently upgraded to
+ *     a bcrypt hash so we never store plaintext again.
+ */
 
-function getJwtSecret() {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error("JWT_SECRET is not configured on this deployment.");
-  return secret;
+function escapeForLog(s: string): string {
+  return s.replace(/[\r\n]/g, "").slice(0, 100);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Always send JSON, even on configuration errors — prevents the client
-  // "Failed to execute 'json' on 'Response': Unexpected end of JSON input"
-  // error when Vercel returns an empty body for unhandled exceptions.
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });
@@ -34,92 +34,150 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const { email, password, role } = req.body || {};
     if (!email || !password || !role) {
-      return res.status(400).json({ error: "Email, password and role are required" });
+      return res
+        .status(400)
+        .json({ error: "Email, password and role are required" });
     }
 
     const jwtSecret = getJwtSecret();
+    const supabase = getSupabase();
+    const normalizedEmail = String(email).trim().toLowerCase();
 
+    // ─── ADMIN LOGIN ───────────────────────────────────────────────
     if (role === "admin") {
-      if (email === "admin@college.edu" && password === "password") {
-        const token = jwt.sign(
-          { id: "ADMIN", email, role: "admin", name: "System Administrator" },
-          jwtSecret,
-          { expiresIn: "1d" }
-        );
-        return res.json({ token, user: { id: "ADMIN", email, role: "admin", name: "System Administrator" } });
+      const { data: admin, error } = await supabase
+        .from("admins")
+        .select("id, name, email, password_hash")
+        .eq("email", normalizedEmail)
+        .maybeSingle();
+
+      if (error) {
+        console.error("[login] admin lookup error:", error.message);
+        return res.status(401).json({ error: "Invalid administrator credentials" });
       }
-      return res.status(401).json({ error: "Invalid Administration credentials" });
+
+      const ok = admin && await verifyPassword(password, admin.password_hash);
+      if (!admin || !ok) {
+        return res.status(401).json({ error: "Invalid administrator credentials" });
+      }
+
+      const token = jwt.sign(
+        { id: admin.id, email: admin.email, role: "admin", name: admin.name },
+        jwtSecret,
+        { expiresIn: "1d" }
+      );
+      return res.json({
+        token,
+        user: { id: admin.id, email: admin.email, role: "admin", name: admin.name },
+      });
     }
 
+    // ─── LECTURER LOGIN ────────────────────────────────────────────
     if (role === "lecturer") {
-      const supabase = getSupabase();
-      const result: any = await supabase
+      const { data: lecturer, error } = await supabase
         .from("lecturers")
-        .select("*")
-        .ilike("email", email)
-        .single();
-      const lecturer: any = result.data;
-      const error = result.error;
+        .select("id, name, email, password_hash, password")
+        .eq("email", normalizedEmail)   // EXACT match — no ilike wildcards
+        .maybeSingle();
 
       if (error) {
-        // .single() throws when 0 or >1 rows match — log for visibility, but
-        // continue to the credential check below (lecturer will be null).
-        console.warn("[login] lecturer lookup failed:", error.message);
+        console.error("[login] lecturer lookup error:", error.message);
+        return res.status(401).json({ error: "Invalid lecturer credentials" });
       }
 
-      if (lecturer && lecturer.password === password) {
-        const token = jwt.sign(
-          { id: lecturer.id, email: lecturer.email, role: "lecturer", name: lecturer.name },
-          jwtSecret,
-          { expiresIn: "1d" }
-        );
-        return res.json({ token, user: { id: lecturer.id, email: lecturer.email, role: "lecturer", name: lecturer.name } });
+      let ok = false;
+      if (lecturer) {
+        // Primary path: bcrypt hash
+        if (lecturer.password_hash) {
+          ok = await verifyPassword(password, lecturer.password_hash);
+        }
+        // Migration path: legacy plaintext (one-time, then upgrade)
+        else if (lecturer.password && safeEqual(password, lecturer.password)) {
+          ok = true;
+          // Upgrade to bcrypt hash immediately
+          const { hashPassword } = await import("./_password");
+          const newHash = await hashPassword(password);
+          await supabase
+            .from("lecturers")
+            .update({ password_hash: newHash, password: null })
+            .eq("id", lecturer.id);
+        }
       }
-      return res.status(401).json({ error: "Invalid Lecturer credentials" });
+
+      if (!lecturer || !ok) {
+        return res.status(401).json({ error: "Invalid lecturer credentials" });
+      }
+
+      const token = jwt.sign(
+        { id: lecturer.id, email: lecturer.email, role: "lecturer", name: lecturer.name },
+        jwtSecret,
+        { expiresIn: "1d" }
+      );
+      return res.json({
+        token,
+        user: { id: lecturer.id, email: lecturer.email, role: "lecturer", name: lecturer.name },
+      });
     }
 
+    // ─── STUDENT LOGIN ─────────────────────────────────────────────
     if (role === "student") {
-      const supabase = getSupabase();
-      const result: any = await supabase
+      // Student can log in with either email OR registration number.
+      // Use OR with exact `.eq()` on each — never ilike (wildcard injection).
+      const { data: student, error } = await supabase
         .from("students")
-        .select("*")
-        .or(`email.ilike.${email},registration_number.ilike.${email}`)
-        .single();
-      const student: any = result.data;
-      const error = result.error;
+        .select("id, name, email, registration_number, batch, specialization, password_hash, password")
+        .or(`email.eq.${normalizedEmail},registration_number.eq.${String(email).trim()}`)
+        .maybeSingle();
 
       if (error) {
-        console.warn("[login] student lookup failed:", error.message);
+        console.error("[login] student lookup error:", error.message);
+        return res.status(401).json({ error: "Invalid student credentials" });
       }
 
-      if (student && student.password === password) {
-        const token = jwt.sign(
-          {
-            id: student.id,
-            email: student.email,
-            role: "student",
-            name: student.name,
-            registrationNumber: student.registration_number,
-            batch: student.batch,
-            specialization: student.specialization,
-          },
-          jwtSecret,
-          { expiresIn: "1d" }
-        );
-        return res.json({
-          token,
-          user: {
-            id: student.id,
-            email: student.email,
-            role: "student",
-            name: student.name,
-            registrationNumber: student.registration_number,
-            batch: student.batch,
-            specialization: student.specialization,
-          },
-        });
+      let ok = false;
+      if (student) {
+        if (student.password_hash) {
+          ok = await verifyPassword(password, student.password_hash);
+        } else if (student.password && safeEqual(password, student.password)) {
+          ok = true;
+          const { hashPassword } = await import("./_password");
+          const newHash = await hashPassword(password);
+          await supabase
+            .from("students")
+            .update({ password_hash: newHash, password: null })
+            .eq("id", student.id);
+        }
       }
-      return res.status(401).json({ error: "Invalid Student credentials" });
+
+      if (!student || !ok) {
+        return res.status(401).json({ error: "Invalid student credentials" });
+      }
+
+      const token = jwt.sign(
+        {
+          id: student.id,
+          email: student.email,
+          role: "student",
+          name: student.name,
+          registrationNumber: student.registration_number,
+          batch: student.batch,
+          specialization: student.specialization,
+        },
+        jwtSecret,
+        { expiresIn: "1d" }
+      );
+      return res.json({
+        token,
+        user: {
+          id: student.id,
+          email: student.email,
+          role: "student",
+          name: student.name,
+          registrationNumber: student.registration_number,
+          batch: student.batch,
+          specialization: student.specialization,
+        },
+      });
     }
 
     return res.status(400).json({ error: "Unsupported user role" });
