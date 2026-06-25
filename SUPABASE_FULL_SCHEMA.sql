@@ -24,8 +24,8 @@ CREATE TABLE IF NOT EXISTS public.lecturers (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL,
   email         TEXT NOT NULL UNIQUE,
-  password_hash TEXT,                       -- bcrypt hash; legacy `password` column is migrated below
-  password      TEXT,                       -- kept temporarily for migration; drop after rollout
+  password_hash TEXT,
+  password      TEXT,
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS public.students (
   batch               TEXT NOT NULL,
   specialization      TEXT NOT NULL,
   password_hash       TEXT,
-  password            TEXT,                 -- legacy; migrated to password_hash
+  password            TEXT,
   created_at          TIMESTAMPTZ DEFAULT now()
 );
 
@@ -231,19 +231,98 @@ CREATE POLICY "password_resets_blocked"
   USING (false) WITH CHECK (false);
 
 -- ============================================================
--- 9. PASSWORD MIGRATION
+-- 9. ALTER EXISTING TABLES TO ADD NEW COLUMNS
+--    CREATE TABLE IF NOT EXISTS doesn't modify an existing table's
+--    schema, so we need explicit ALTER TABLE statements to add the
+--    password_hash column to pre-existing students/lecturers tables.
+-- ============================================================
+
+-- Helper: add a column if it doesn't exist (Postgres doesn't have IF NOT EXISTS
+-- for ADD COLUMN in older versions, so we guard with DO blocks).
+DO $$
+BEGIN
+  -- students.password_hash
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'students' AND column_name = 'password_hash') THEN
+    ALTER TABLE public.students ADD COLUMN password_hash TEXT;
+  END IF;
+
+  -- students.password (legacy plaintext column — may already exist)
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'students' AND column_name = 'password') THEN
+    ALTER TABLE public.students ADD COLUMN password TEXT;
+  END IF;
+
+  -- lecturers.password_hash
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'lecturers' AND column_name = 'password_hash') THEN
+    ALTER TABLE public.lecturers ADD COLUMN password_hash TEXT;
+  END IF;
+
+  -- lecturers.password
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'lecturers' AND column_name = 'password') THEN
+    ALTER TABLE public.lecturers ADD COLUMN password TEXT;
+  END IF;
+
+  -- subjects.lecturer_id — make nullable if it isn't (BREAK subject has NULL lecturer)
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'subjects' AND column_name = 'lecturer_id') THEN
+    BEGIN
+      ALTER TABLE public.subjects ALTER COLUMN lecturer_id DROP NOT NULL;
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+  END IF;
+END$$;
+
+-- Make sure email + registration_number columns exist and have unique constraints.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'lecturers_email_key' AND conrelid = 'public.lecturers'::regclass
+  ) THEN
+    BEGIN
+      ALTER TABLE public.lecturers ADD CONSTRAINT lecturers_email_key UNIQUE (email);
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'students_email_key' AND conrelid = 'public.students'::regclass
+  ) THEN
+    BEGIN
+      ALTER TABLE public.students ADD CONSTRAINT students_email_key UNIQUE (email);
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'students_registration_number_key' AND conrelid = 'public.students'::regclass
+  ) THEN
+    BEGIN
+      ALTER TABLE public.students ADD CONSTRAINT students_registration_number_key UNIQUE (registration_number);
+    EXCEPTION WHEN OTHERS THEN NULL;
+    END;
+  END IF;
+END$$;
+
+-- ============================================================
+-- 9b. PASSWORD MIGRATION
 --    Move any existing plaintext passwords into password_hash
 --    using a SHA-256 placeholder hash. (Real bcrypt hashing happens
 --    on next login / password reset — see /api/login.ts.)
 -- ============================================================
 UPDATE public.students
-   SET password_hash = password_hash
+   SET password_hash = COALESCE(password_hash, '')
         || encode(hmac(password, 'veritas_legacy_migration_v1', 'sha256'), 'hex')
  WHERE password IS NOT NULL
    AND password_hash IS NULL;
 
 UPDATE public.lecturers
-   SET password_hash = password_hash
+   SET password_hash = COALESCE(password_hash, '')
         || encode(hmac(password, 'veritas_legacy_migration_v1', 'sha256'), 'hex')
  WHERE password IS NOT NULL
    AND password_hash IS NULL;
@@ -280,22 +359,23 @@ CREATE SEQUENCE IF NOT EXISTS public.attendance_id_seq START 1 INCREMENT 1 NO CY
 -- (LECT001, LECT002, etc.) don't collide with the next generated ID.
 DO $$
 DECLARE
-  max_n int;
+  max_n bigint;
 BEGIN
-  SELECT COALESCE(MAX(COALESCE(NULLIF(regexp_replace(id, '\\D', '', 'g'), '')::int, 0)), 0) INTO max_n FROM public.lecturers;
+  SELECT COALESCE(MAX(COALESCE(NULLIF(regexp_replace(id, '[^0-9]', '', 'g'), '')::bigint, 0)), 0) INTO max_n FROM public.lecturers;
   EXECUTE format('SELECT setval($1, $2)', max_n) USING 'public.lecturers_id_seq'::regclass, GREATEST(max_n, 1);
 
-  SELECT COALESCE(MAX(COALESCE(NULLIF(regexp_replace(id, '\\D', '', 'g'), '')::int, 0)), 0) INTO max_n FROM public.students;
+  SELECT COALESCE(MAX(COALESCE(NULLIF(regexp_replace(id, '[^0-9]', '', 'g'), '')::bigint, 0)), 0) INTO max_n FROM public.students;
   EXECUTE format('SELECT setval($1, $2)', max_n) USING 'public.students_id_seq'::regclass, GREATEST(max_n, 1);
 
-  SELECT COALESCE(MAX(COALESCE(NULLIF(regexp_replace(id, '\\D', '', 'g'), '')::int, 0)), 0) INTO max_n FROM public.subjects;
+  SELECT COALESCE(MAX(COALESCE(NULLIF(regexp_replace(id, '[^0-9]', '', 'g'), '')::bigint, 0)), 0) INTO max_n FROM public.subjects;
   EXECUTE format('SELECT setval($1, $2)', max_n) USING 'public.subjects_id_seq'::regclass, GREATEST(max_n, 1);
 
-  SELECT COALESCE(MAX(COALESCE(NULLIF(regexp_replace(id, '\\D', '', 'g'), '')::int, 0)), 0) INTO max_n FROM public.timetable;
+  SELECT COALESCE(MAX(COALESCE(NULLIF(regexp_replace(id, '[^0-9]', '', 'g'), '')::bigint, 0)), 0) INTO max_n FROM public.timetable;
   EXECUTE format('SELECT setval($1, $2)', max_n) USING 'public.timetable_id_seq'::regclass, GREATEST(max_n, 1);
 
-  SELECT COALESCE(MAX(COALESCE(NULLIF(regexp_replace(id, '\\D', '', 'g'), '')::int, 0)), 0) INTO max_n FROM public.attendance;
-  EXECUTE format('SELECT setval($1, $2)', max_n) USING 'public.attendance_id_seq'::regclass, GREATEST(max_n, 1);
+  -- Attendance uses deterministic IDs like ATT_<studentId>_<subjectId>_<date>,
+  -- which don't follow the ATT### pattern. Skip sequence sync — the sequence
+  -- will be used only if attendance ever switches back to sequential IDs.
 END$$;
 
 -- Stored function: next_sequential_id(prefix, table) → 'PREFIX001' style ID.
