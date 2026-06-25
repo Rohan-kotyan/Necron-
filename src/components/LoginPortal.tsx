@@ -150,21 +150,23 @@ export default function LoginPortal({ onLoginSuccess }: LoginPortalProps) {
         }),
       });
 
-      // Safely parse JSON — endpoint may not exist yet on this deployment
+      // Safely parse JSON — server should always return JSON now.
       let data: any = null;
       const text = await response.text();
       if (text) {
         try {
           data = JSON.parse(text);
         } catch {
-          /* fall through to the friendly error below */
+          throw new Error(
+            `Server returned a non-JSON response (HTTP ${response.status}). The deployment may be missing environment variables.`
+          );
         }
       }
 
       if (!response.ok || !data) {
         throw new Error(
           data?.error ||
-            "Student self-signup is not yet available on this deployment. Please contact the administrator to provision your account."
+            `Signup failed (HTTP ${response.status}). Please contact the administrator.`
         );
       }
 
@@ -176,7 +178,7 @@ export default function LoginPortal({ onLoginSuccess }: LoginPortalProps) {
     } catch (err: any) {
       const raw = err?.message || "";
       const friendly = raw.includes("Unexpected end of JSON input")
-        ? "Student self-signup is not yet available on this deployment. Please contact the administrator."
+        ? "The signup service is unreachable. Please try again in a moment."
         : raw || "Something went wrong while creating your account.";
       setError(friendly);
     } finally {
