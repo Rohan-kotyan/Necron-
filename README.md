@@ -93,14 +93,6 @@ Open the Supabase SQL Editor and run [`SUPABASE_FULL_SCHEMA.sql`](./SUPABASE_FUL
 npm run dev
 ```
 
-### 5. Deploy to Vercel
-
-```bash
-npm i -g vercel
-vercel
-# Add the same env vars in the Vercel dashboard
-```
-
 ## Security
 
 - **Passwords are bcrypt-hashed** — never stored or compared in plaintext.
@@ -113,3 +105,25 @@ vercel
 ## License
 
 MIT
+
+## Deployment
+
+This project deploys directly to Vercel. No CI/CD pipeline is required — Vercel
+handles the build automatically on every push.
+
+To deploy manually:
+
+```bash
+npm i -g vercel
+vercel
+# Add env vars in the Vercel dashboard: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, JWT_SECRET
+```
+
+## Development
+
+```bash
+npm install
+npm run dev        # start Vite dev server
+npm run typecheck  # TypeScript type check (no emit)
+npm run build      # production build to dist/
+```

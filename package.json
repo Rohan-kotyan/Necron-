@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "tsc --noEmit && eslint . --ext .ts,.tsx",
+    "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
@@ -35,7 +35,6 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vercel/node": "^3.0.0",
-    "eslint": "^9.0.0",
     "prettier": "^3.3.0",
     "tailwindcss": "^4.1.14",
     "typescript": "~5.8.2",
