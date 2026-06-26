@@ -1,10 +1,9 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
+// Test: can we even import _auth.ts at all?
 import { getJwtSecret } from "./_auth";
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   try {
-    const secret = getJwtSecret();
-    return res.status(200).json({ ok: true, secretLen: secret.length });
+    return res.status(200).json({ ok: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
