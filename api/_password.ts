@@ -1,14 +1,6 @@
-import bcrypt from "bcryptjs";
-
-/**
- * Password hashing helpers.
- *
- * Previously the codebase stored passwords in plaintext and compared with
- * `===`. This module replaces that with bcrypt hashing.
- *
- * Hash format: bcrypt with 10 rounds (≈80ms per hash, acceptable for
- * serverless cold starts).
- */
+// Use require() instead of import for bcryptjs — avoids ESM/CJS interop issues
+// on Vercel's Node 24 runtime when bundled with other CJS modules.
+const bcrypt = require("bcryptjs");
 
 const SALT_ROUNDS = 10;
 
@@ -31,10 +23,6 @@ export async function verifyPassword(
   }
 }
 
-/**
- * Constant-time comparison for legacy plaintext passwords (used during
- * the migration window — once `password` column is dropped, this can go).
- */
 export function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
