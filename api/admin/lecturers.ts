@@ -1,4 +1,3 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase, nextId } from "../_db";
 import { requireRole } from "../_auth";
 import { hashPassword } from "../_password";
@@ -15,7 +14,7 @@ import { hashPassword } from "../_password";
  *   • Uses nextId() (sequence-based) instead of COUNT(*)+1 which
  *     collided after deletions and under concurrent inserts.
  */
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   try {
     const ctx = requireRole(req, res, ["admin"]);
     if (!ctx) return;

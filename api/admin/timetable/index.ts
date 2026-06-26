@@ -1,4 +1,3 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase, nextId } from "../../_db";
 import { requireRole, TIMETABLE_EDITOR_ROLES, requireAuth } from "../../_auth";
 
@@ -52,7 +51,7 @@ function mapRow(r: any) {
   };
 }
 
-async function listEntries(req: VercelRequest, res: VercelResponse) {
+async function listEntries(req: any, res: any) {
   // Any authenticated role can read.
   const ctx = requireAuth(req, res);
   if (!ctx) return;
@@ -84,7 +83,7 @@ async function listEntries(req: VercelRequest, res: VercelResponse) {
   return res.json({ timetable: (data || []).map(mapRow) });
 }
 
-async function createEntry(req: VercelRequest, res: VercelResponse) {
+async function createEntry(req: any, res: any) {
   const ctx = requireRole(req, res, TIMETABLE_EDITOR_ROLES);
   if (!ctx) return;
 
@@ -124,7 +123,7 @@ async function createEntry(req: VercelRequest, res: VercelResponse) {
   return res.status(201).json({ success: true, timetableEntry: mapRow(data) });
 }
 
-async function updateEntry(req: VercelRequest, res: VercelResponse) {
+async function updateEntry(req: any, res: any) {
   const ctx = requireRole(req, res, TIMETABLE_EDITOR_ROLES);
   if (!ctx) return;
 
@@ -175,7 +174,7 @@ async function updateEntry(req: VercelRequest, res: VercelResponse) {
   return res.json({ success: true, timetableEntry: mapRow(data) });
 }
 
-async function deleteEntry(req: VercelRequest, res: VercelResponse) {
+async function deleteEntry(req: any, res: any) {
   const ctx = requireRole(req, res, TIMETABLE_EDITOR_ROLES);
   if (!ctx) return;
 
@@ -189,7 +188,7 @@ async function deleteEntry(req: VercelRequest, res: VercelResponse) {
   return res.json({ success: true, id });
 }
 
-async function createSubject(req: VercelRequest, res: VercelResponse) {
+async function createSubject(req: any, res: any) {
   const ctx = requireRole(req, res, TIMETABLE_EDITOR_ROLES);
   if (!ctx) return;
 
@@ -231,7 +230,7 @@ async function createSubject(req: VercelRequest, res: VercelResponse) {
     });
 }
 
-async function bulkInsert(req: VercelRequest, res: VercelResponse) {
+async function bulkInsert(req: any, res: any) {
   const ctx = requireRole(req, res, TIMETABLE_EDITOR_ROLES);
   if (!ctx) return;
 
@@ -311,7 +310,7 @@ async function bulkInsert(req: VercelRequest, res: VercelResponse) {
   });
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   try {
     if (req.method === "GET") return await listEntries(req, res);
     if (req.method === "POST") {

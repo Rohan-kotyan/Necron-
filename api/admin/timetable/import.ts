@@ -1,4 +1,3 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { requireRole, TIMETABLE_EDITOR_ROLES } from "../../_auth";
 import { getSupabase } from "../../_db";
 import {
@@ -30,7 +29,7 @@ import { DEFAULT_TIMETABLE_XLSX_BASE64 } from "../../_lib/default_timetable";
  *
  * Also: students are blocked at the role check (403).
  */
-async function readBody(req: VercelRequest): Promise<Buffer> {
+async function readBody(req: any): Promise<Buffer> {
   // Vercel may stream the body or place it on req.body depending on content type.
   // We accept either a base64 string in JSON or a raw binary body.
   const ct = (req.headers["content-type"] || "").toLowerCase();
@@ -47,7 +46,7 @@ async function readBody(req: VercelRequest): Promise<Buffer> {
   throw new Error("Unsupported request body. Send JSON {buffer} or raw xlsx bytes.");
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });

@@ -1,4 +1,3 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase, nextId } from "../../_db";
 import { getJwtSecret } from "../../_auth";
 import { hashPassword } from "../../_password";
@@ -27,7 +26,7 @@ const VALID_BATCHES = ["A1", "A2", "A3", "A4"];
 const VALID_SPECIALIZATIONS = ["AI & ML", "SD", "MV"];
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });

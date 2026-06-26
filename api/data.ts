@@ -1,4 +1,3 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { getSupabase } from "./_db";
 import { requireAuth, requireRole } from "./_auth";
 
@@ -16,7 +15,7 @@ import { requireAuth, requireRole } from "./_auth";
  * The previous version had NO authentication and dumped the full student
  * roster / attendance history to the world. That was a critical hole.
  */
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "GET") {
       return res.status(405).json({ error: "Method not allowed" });

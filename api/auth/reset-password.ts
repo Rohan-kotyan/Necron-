@@ -1,4 +1,3 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
 import crypto from "crypto";
 import { getSupabase } from "../_db";
 import { hashPassword } from "../_password";
@@ -14,7 +13,7 @@ import { hashPassword } from "../_password";
  * reset, regardless of whether the password update succeeded.
  */
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });

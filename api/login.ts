@@ -1,4 +1,3 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
 import jwt from "jsonwebtoken";
 import { getSupabase } from "./_db";
 import { getJwtSecret } from "./_auth";
@@ -26,7 +25,7 @@ function escapeForLog(s: string): string {
   return s.replace(/[\r\n]/g, "").slice(0, 100);
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });
