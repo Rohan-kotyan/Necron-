@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import { getSupabase, getJwtSecret, hashPassword, verifyPassword, safeEqual, crypto } from "./_shared";
+import { getSupabase, getJwtSecret, hashPassword, verifyPassword, safeEqual, crypto } from "./shared";
 
 export default async function handler(req: any, res: any) {
   try {
