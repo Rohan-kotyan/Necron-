@@ -158,16 +158,18 @@ export default function LoginPortal({ onLoginSuccess }: LoginPortalProps) {
           data = JSON.parse(text);
         } catch {
           throw new Error(
-            `Server returned a non-JSON response (HTTP ${response.status}). The deployment may be missing environment variables.`
+            `Server returned a non-JSON response (HTTP ${response.status}).`
           );
         }
       }
 
-      if (!response.ok || !data) {
-        throw new Error(
-          data?.error ||
-            `Signup failed (HTTP ${response.status}). Please contact the administrator.`
-        );
+      if (!response.ok) {
+        // Show the actual error from the server (e.g. "An account with this email already exists.")
+        const errorMsg = data?.error || `Signup failed (HTTP ${response.status}).`;
+        throw new Error(errorMsg);
+      }
+      if (!data) {
+        throw new Error("Server returned an empty response. Please try again.");
       }
 
       setSignupSuccess(true);
