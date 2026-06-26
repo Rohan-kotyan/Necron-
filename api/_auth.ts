@@ -1,11 +1,7 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
 import jwt from "jsonwebtoken";
 
 /**
  * Shared auth helpers for ALL endpoints.
- *
- * Previously only the timetable module used these. Now every endpoint that
- * touches sensitive data (data, attendance, admin/*) goes through them too.
  */
 
 export type Role = "student" | "lecturer" | "admin";
@@ -19,6 +15,16 @@ export interface AuthContext {
   batch?: string;
   specialization?: string;
   registrationNumber?: string;
+}
+
+// Use minimal inline types instead of importing from @vercel/node.
+// This avoids any bundler issues with the @vercel/node type import.
+interface MinimalRequest {
+  headers: Record<string, string | string[] | undefined>;
+}
+interface MinimalResponse {
+  status(code: number): MinimalResponse;
+  json(body: any): void;
 }
 
 export function getJwtSecret(): string {
@@ -35,8 +41,7 @@ export function getJwtSecret(): string {
  * Extracts and verifies the Bearer token from the Authorization header.
  * Returns null on missing/invalid token (caller decides how to respond).
  */
-export function readAuthContext(req: VercelRequest): AuthContext | null {
-  // Node lowercases all header names; the second branch is dead but harmless.
+export function readAuthContext(req: MinimalRequest): AuthContext | null {
   const header = req.headers["authorization"];
   if (!header || typeof header !== "string") return null;
   const match = header.match(/^Bearer\s+(.+)$/i);
@@ -62,7 +67,7 @@ export function readAuthContext(req: VercelRequest): AuthContext | null {
  * Require an authenticated session. Sends 401 JSON on failure.
  * Returns the AuthContext on success.
  */
-export function requireAuth(req: VercelRequest, res: VercelResponse): AuthContext | null {
+export function requireAuth(req: MinimalRequest, res: MinimalResponse): AuthContext | null {
   const ctx = readAuthContext(req);
   if (!ctx) {
     res.status(401).json({ error: "Authentication required." });
@@ -76,8 +81,8 @@ export function requireAuth(req: VercelRequest, res: VercelResponse): AuthContex
  * Sends 401 (no auth) or 403 (wrong role) JSON on failure.
  */
 export function requireRole(
-  req: VercelRequest,
-  res: VercelResponse,
+  req: MinimalRequest,
+  res: MinimalResponse,
   allowed: Role[]
 ): AuthContext | null {
   const ctx = requireAuth(req, res);
