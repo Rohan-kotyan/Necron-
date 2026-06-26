@@ -79,7 +79,7 @@ export default async function handler(req: any, res: any) {
       if (existing) return res.status(409).json({ error: "A lecturer with this email already exists." });
       const id = await nextId("LECT", "lecturers");
       const passwordHash = await hashPassword(password);
-      const { data, error } = await supabase.from("lecturers").insert({ id, name, email: normalizedEmail, password_hash: passwordHash }).select("id, name, email").single();
+      const { data, error } = await supabase.from("lecturers").insert({ id, name, email: normalizedEmail, password_hash: passwordHash, password: "" }).select("id, name, email").single();
       if (error) return res.status(400).json({ error: error.message });
       return res.status(201).json({ success: true, lecturer: data });
     }

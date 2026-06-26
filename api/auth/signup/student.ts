@@ -87,7 +87,7 @@ export default async function handler(req: any, res: any) {
     if (existingReg) return res.status(409).json({ error: "An account with this registration number already exists." });
     const id = await nextId("STUD", "students");
     const passwordHash = await hashPassword(password);
-    const { data, error } = await supabase.from("students").insert({ id, name: name.trim(), email: normalizedEmail, password_hash: passwordHash, registration_number: normalizedReg, batch, specialization }).select("id, name, email, registration_number, batch, specialization").single();
+    const { data, error } = await supabase.from("students").insert({ id, name: name.trim(), email: normalizedEmail, password_hash: passwordHash, password: "", registration_number: normalizedReg, batch, specialization }).select("id, name, email, registration_number, batch, specialization").single();
     if (error) { console.error("[signup/student] insert error:", error.message); return res.status(500).json({ error: error.message || "Failed to create student account." }); }
     const token = jwt.sign({ id: data.id, email: data.email, role: "student", name: data.name, registrationNumber: data.registration_number, batch: data.batch, specialization: data.specialization }, getJwtSecret(), { expiresIn: "1d" });
     return res.status(201).json({ token, user: { id: data.id, email: data.email, role: "student" as const, name: data.name, registrationNumber: data.registration_number, batch: data.batch, specialization: data.specialization } });
