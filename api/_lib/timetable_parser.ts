@@ -1,6 +1,31 @@
 import * as XLSX from "xlsx";
-import { getSupabase, nextId } from "../_db";
-import { hashPassword } from "../_password";
+import { createClient } from "@supabase/supabase-js";
+import bcrypt from "bcryptjs";
+
+// Inlined shared helpers (Vercel Node 24 can't import from local modules)
+let _supabase: any = null;
+function getSupabase() {
+  if (_supabase) return _supabase;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Supabase not configured");
+  _supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  return _supabase;
+}
+async function nextId(prefix: string, table: string): Promise<string> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase.rpc("next_sequential_id", { p_prefix: prefix, p_table: table });
+  if (error || !data) {
+    const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
+    const ts = Date.now().toString(36).toUpperCase().slice(-6);
+    return prefix + ts + rand;
+  }
+  return String(data);
+}
+async function hashPassword(plaintext: string): Promise<string> {
+  if (!plaintext || plaintext.length < 6) throw new Error("Password too short");
+  return bcrypt.hash(plaintext, 10);
+}
 
 /**
  * Excel parser + DB seeder for the timetable module.
